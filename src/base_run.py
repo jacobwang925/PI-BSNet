@@ -66,7 +66,7 @@ class base_run(ABC):
     def pde_residual(**kwargs):
         pass
         
-    def setup(self, json_file):
+    def setup(self, json_file, **kwargs):
         if json_file is None:
             self.__setattr__("is_configured", False) 
         elif Path(json_file).is_file():            
@@ -75,14 +75,19 @@ class base_run(ABC):
                 
             try:
                 validate(instance=cfg, schema=schema)
-                print("JSON data is valid.")
+                logger.info("JSON data is valid.")
             except ValidationError as e:
-                print(f"JSON data is invalid: {e.message}")
+                logger.error(f"JSON data is invalid: {e.message}")
                 
             
             for name, value in cfg.items():
                 self.__setattr__(name, value)
             self.__setattr__("is_configured", True)
+            
+            
+        #overwrite from command line
+        for name, value in kwargs.items():
+            self.__setattr__(name, value)
          
         self.save_prefix = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Generate B-spline basis matrices
@@ -124,6 +129,36 @@ class base_run(ABC):
             logger.info("Default optimizer is adam")
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.model_params.get("learning_rate")) 
             self.optim_needs_closure = False
+        
+        # load_checkpoint
+        if hasattr(self, "checkpoint"):
+            self.load_checkpoint(self.__getattribute__("checkpoint"))
+        
+        
+        #load_data
+        if type(self.lmbda_train) == str:
+            numpy_file = Path(self.lmbda_train)
+            if numpy_file.is_file():
+                self.lmbda_train = np.load(numpy_file) 
+            else:
+                logger.warning(f"training lambda file: {self.lmbda_train} does not exist")
+                self.lmbda_train = False
+        else:
+            self.lmbda_train = np.array(self.lmbda_train)
+        
+    
+        if type(self.lmbda_test) == str:
+            numpy_file = Path(self.lmbda_test)
+            if numpy_file.is_file():
+                self.lmbda_test = np.load(numpy_file) 
+            else:
+                logger.warning(f"training lambda file: {self.lmbda_test} does not exist")
+                self.lmbda_test = False
+        else:
+            self.lmbda_test = np.array(self.lmbda_test)
+    
+        #print to visually inspect.
+        self.print_attributes()
         
     def print_attributes(self):
         logger.info("--- Print Attributes ---")
@@ -175,8 +210,11 @@ class base_run(ABC):
                     }, checkpoint_path)
         logger.info(f"Checkpoint saved: {checkpoint_path}\n")
         
-    def load_checkpoint(self):
-        logger.info(f"  Loading checkpoint: {self.checkpoint}\n")
-        checkpoint = torch.load(self.checkpoint, weights_only =True)
-        self.model.load_state_dict(checkpoint["model_state_dict"])
+    def load_checkpoint(self, checkpoint):
+        logger.info(f"  Loading checkpoint: {checkpoint}\n")
+        if Path(checkpoint).is_file():
+            checkpoint = torch.load(checkpoint, weights_only =True)
+            self.model.load_state_dict(checkpoint["model_state_dict"])
+        else:
+            logger.warning(f"checkpoint file {checkpoint} not found.")
         
