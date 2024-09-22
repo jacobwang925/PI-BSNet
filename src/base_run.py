@@ -112,10 +112,18 @@ class base_run(ABC):
         self.model = ControlPointNet(self.n_ctrl_pts_state,
                                      self.n_ctrl_pts_time, 
                                      self.model_params.get("hidden_dim"), 
-                                     self.model_params.get("hidden_depth"))
-        
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.model_params.get("learning_rate"))
-        
+                                     self.model_params.get("hidden_depth"), 
+                                     self.model_params.get("conv2d"))
+        if self.model_params.get("optimizer").lower() =="adam":
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.model_params.get("learning_rate"))
+            self.optim_needs_closure = False
+        elif self.model_params.get("optimizer").lower() =="lbfgs":
+            self.optimizer = optim.LBFGS(self.model.parameters(), history_size=100) 
+            self.optim_needs_closure = True
+        else:
+            logger.info("Default optimizer is adam")
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.model_params.get("learning_rate")) 
+            self.optim_needs_closure = False
         
     def print_attributes(self):
         logger.info("--- Print Attributes ---")
