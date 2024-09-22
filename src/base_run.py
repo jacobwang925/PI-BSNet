@@ -28,7 +28,6 @@ schema = {
         "max_X": {"type": "number"},
         "bspline_order": {"type": "integer"},
         "n_points": {"type": "integer"},
-        "a": {"type": "number"},
         "lmbda_train": {
             "anyOf": [
                 {
@@ -54,7 +53,7 @@ schema = {
             }
     },
     
-    "required": ["T",  "min_T", "max_T", "min_X", "max_X"]
+    "required": ["T",  "min_T", "max_T", "min_X", "max_X", "bspline_order"]
 }
 
 
@@ -207,13 +206,29 @@ class base_run(ABC):
         checkpoint_filename = f"{self.save_prefix}_loss_{loss:.6f}.pt"
         checkpoint_path = Path(self.save_path) / checkpoint_filename
         torch.save({"model_state_dict":self.model.state_dict(),
+                    "n_ctrl_pts_state":self.n_ctrl_pts_state,
+                    "n_ctrl_pts_time": self.n_ctrl_pts_time, 
+                    "hidden_dim":       self.model_params.get("hidden_dim"), 
+                    "hidden_depth":    self.model_params.get("hidden_depth"), 
+                    "conv2d":          self.model_params.get("conv2d")
                     }, checkpoint_path)
-        logger.info(f"Checkpoint saved: {checkpoint_path}\n")
+        logger.info(f"\nCheckpoint saved: {checkpoint_path}")
         
     def load_checkpoint(self, checkpoint):
         logger.info(f"  Loading checkpoint: {checkpoint}\n")
+        
         if Path(checkpoint).is_file():
             checkpoint = torch.load(checkpoint, weights_only =True)
+            if checkpoint.get("n_ctrl_pts_state") and \
+                    checkpoint.get("n_ctrl_pts_time") and \
+                    checkpoint.get("hidden_dim") and \
+                    checkpoint.get("hidden_depth") and \
+                    checkpoint.get("conv2d"):
+                self.model = ControlPointNet(checkpoint["n_ctrl_pts_state"],
+                                            checkpoint["n_ctrl_pts_time"],
+                                            checkpoint["hidden_dim"],
+                                            checkpoint["hidden_depth"],
+                                            checkpoint["conv2d"])
             self.model.load_state_dict(checkpoint["model_state_dict"])
         else:
             logger.warning(f"checkpoint file {checkpoint} not found.")
