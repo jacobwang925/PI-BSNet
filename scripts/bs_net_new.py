@@ -72,31 +72,35 @@ class bsnet_train(base_run):
         loss = 0
         ploss = 0
         dloss = 0
-        U_full = self.impose_icbc(y_hat) 
-        #print(U_full)
-        #print(y_true)
+        U_full = torch.stack([self.impose_icbc(y_hat[i]) for i in range(y_hat.shape[0])], dim=0)  
         if physics_loss:
-            # Compute B-spline derivatives (t, x, and x^2 derivatives)
-            B_s_t, B_s_x, B_s_xx = compute_bspline_derivatives(U_full, 
-                                                                self.Bit_t, 
-                                                                self.Bit_x, 
-                                                                self.Bit_t_derivative,
-                                                                self.Bit_x_derivative,
-                                                                self.Bit_t_second_derivative, 
-                                                                self.Bit_x_second_derivative)
-            pde_residual = self.pde_residual(B_s_t=B_s_t, 
-                                             B_s_x=B_s_x, 
-                                             B_s_xx= B_s_xx, 
-                                             lmbda = lmbda)
-            physics_loss = torch.mean(torch.pow(pde_residual,2))
+            pde_residuals = []
+            for i in range(y_hat.shape[0]):
+                # Compute B-spline derivatives (t, x, and x^2 derivatives)
+                B_s_t, B_s_x, B_s_xx = compute_bspline_derivatives(U_full[i], 
+                                                                    self.Bit_t, 
+                                                                    self.Bit_x, 
+                                                                    self.Bit_t_derivative,
+                                                                    self.Bit_x_derivative,
+                                                                    self.Bit_t_second_derivative, 
+                                                                    self.Bit_x_second_derivative)
+                pde_residuals.append(self.pde_residual(B_s_t=B_s_t, 
+                                                B_s_x=B_s_x, 
+                                                B_s_xx= B_s_xx, 
+                                                lmbda = lmbda[i]))
+                
+            physics_loss = torch.mean(torch.pow(torch.hstack(pde_residuals),2))
             ploss = physics_loss.detach()
+                
             loss +=physics_loss*physics_loss_weight
             
         if data_loss:
-            m_hat = self.make_surface(U_full)
-            data_loss = torch.mean(torch.pow(y_true- m_hat,2))
-            loss +=data_loss*data_loss_weight
-            dloss = data_loss.detach()
+            data_loss =0
+            for i in range(y_hat.shape[0]):
+                m_hat = self.make_surface(U_full[i])
+                data_loss += torch.pow(y_true[i]- m_hat,2)
+            loss +=torch.mean(data_loss)*data_loss_weight
+            dloss = torch.mean(data_loss).detach()
             
         return loss, ploss, dloss
         
@@ -139,42 +143,54 @@ class bsnet_train(base_run):
         isSaved = False
                     
         for epoch in range(self.model_params.get('max_epochs')):
-            sum_tloss=0
-            sum_ploss=0
-            sum_dloss=0
         
             use_physics = (epoch%phys_loss_cadenc)==0
             use_data = (epoch%data_loss_cadenc)==0
-            
-            for y_true, lmbda in zip(scenario_gt, tch_lmbda ):
+            if not self.optim_needs_closure:
                 self.optimizer.zero_grad()
-                y_hat = self.model(lmbda)
                 
-                tloss, ploss, dloss = self.loss(y_hat, 
-                                  y_true, 
-                                  lmbda, 
-                                  use_physics, 
-                                  use_data, 
-                                  phys_loss_weight, 
-                                  data_loss_weight)
-                sum_tloss += tloss
-                sum_ploss += ploss
-                sum_dloss += dloss
-                
-
-            sum_tloss.backward()
-            self.optimizer.step()
+            y_hat = self.model(tch_lmbda)
             
-            if min_loss*0.9> (sum_tloss.item()-1e-8):
+                
+            tloss, ploss, dloss = self.loss(y_hat, 
+                            scenario_gt, 
+                            tch_lmbda, 
+                            use_physics, 
+                            use_data, 
+                            phys_loss_weight, 
+                            data_loss_weight)
+                
+            if self.optim_needs_closure:
+                def closure():
+                    self.optimizer.zero_grad()
+                    
+                    y_hat = self.model(tch_lmbda) 
+                    tloss, ploss, dloss = self.loss(y_hat, 
+                                    scenario_gt, 
+                                    tch_lmbda, 
+                                    use_physics, 
+                                    use_data, 
+                                    phys_loss_weight, 
+                                    data_loss_weight)
+                    tloss.backward()  
+                    return tloss
+                self.optimizer.step(closure) 
+            
+                    
+            #print(sum_tloss, type(sum_tloss))
+            if not self.optim_needs_closure:
+                tloss.backward()
+                self.optimizer.step()
+            if min_loss*0.9> (tloss.item()-1e-8):
                 if epoch> self.model_params.get("max_epochs")//10 or not isSaved:
-                    self.save_checkpoint(sum_tloss)
+                    self.save_checkpoint(tloss)
                     isSaved =True
-                min_loss = sum_tloss.item()
+                    min_loss = tloss.item()
                 
             if (epoch-1)%newline_rate==0:
                 print()
-            print(f" {epoch+1:05d} total_loss = {sum_tloss.item():2.5f},"+
-                  f" physics_loss = {sum_ploss:2.7f}, data_loss = {sum_dloss:2.7f}"+
+            print(f" {epoch+1:05d} total_loss = {tloss.item():2.5f},"+
+                  f" physics_loss = {ploss:2.7f}, data_loss = {dloss:2.7f}"+
                   f" min_loss {min_loss:2.7f}", end="\r")
         print()
         
