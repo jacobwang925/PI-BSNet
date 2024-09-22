@@ -60,3 +60,31 @@ class ControlPointNet(nn.Module):
             x = layer(x)
             
         return x.view(-1, self.n_cp_t - 1, self.n_cp_x - 1)
+    
+    
+class ControlPointNet3D(nn.Module):
+    def __init__(self, n_cp_x, n_cp_y, n_cp_z,  n_cp_t, hidden_dim=64, hidden_depth=1, final_relu =True):
+        super(ControlPointNet, self).__init__()
+        
+        layers = [nn.Linear(1, hidden_dim), nn.ReLU(inplace=True)]
+        out_shape =hidden_dim
+
+        for i in range(hidden_depth):
+            layers.append(nn.Linear(out_shape, hidden_dim))
+            layers.append(nn.ReLU(inplace=True))
+        
+        layers.append(nn.Linear(hidden_dim, (n_cp_x - 1) *(n_cp_y - 1) *(n_cp_z - 1) * (n_cp_t - 1)))
+        if final_relu:
+            layers.append(nn.ReLU(inplace=True))
+        self.nn  = torch.nn.ModuleList(layers)
+        self.n_cp_x = n_cp_x
+        self.n_cp_t = n_cp_y
+        self.n_cp_z = n_cp_z
+        self.n_cp_t = n_cp_t
+
+    def forward(self, lambda_param):
+        x = lambda_param
+        for enum, layer in enumerate(self.nn):
+            x = layer(x)
+            
+        return x.view(-1, self.n_cp_t - 1, self.n_cp_x - 1, self.n_cp_y -1, self.n_cp_z -1)
