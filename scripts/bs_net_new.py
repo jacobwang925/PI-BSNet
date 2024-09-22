@@ -14,47 +14,6 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 plt.set_loglevel (level = 'warning')
 
-# Define the JSON Schema
-schema = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "type": "object",
-    "properties": {
-        "T": {"type": "integer"},
-        "L": {"type": "integer"},
-        "min_T": {"type": "number"},
-        "max_T": {"type": "number"},
-        "min_X": {"type": "number"},
-        "max_X": {"type": "number"},
-        "bspline_order": {"type": "integer"},
-        "n_points": {"type": "integer"},
-        "a": {"type": "number"},
-        "lmbda_train": {
-            "anyOf": [
-                {
-                    "type": "array",
-                    "items": {"type": "number"}
-                },
-                {
-                    "type": "string"
-                }
-            ]
-        },
-        "n_ctrl_pts_time": {"type": "integer"},
-        "n_ctrl_pts_state": {"type": "integer"},
-        "model_params": {
-            "type": "object",
-            "properties": {
-                "hidden_dim": {"type": "integer"},
-                "hidden_depth":{"type":"integer"},
-                "learning_rate": {"type": "number"},
-                "max_epochs": {"type": "integer"}
-            },
-            "required": ["hidden_dim", "learning_rate", "max_epochs"]
-        }
-    },
-    "required": ["T", "L", "min_T", "max_T", "min_X", "max_X", "bspline_order", "n_points", "a", "lmbda_train", "n_ctrl_pts_time", "n_ctrl_pts_state", "model_params"]
-}
-
 class bsnet_train(base_run):
     def __init__(self, cfg=None):
         #super(bsnet_train, base_run).__init__()
@@ -110,10 +69,12 @@ class bsnet_train(base_run):
             logger.warning(f"uninterpretable command {cmd}")
     
     def loss(self,y_hat, y_true , lmbda, physics_loss = True, data_loss=True, physics_loss_weight=1.0, data_loss_weight=1.0):
-        loss =0
+        loss = 0
         ploss = 0
         dloss = 0
         U_full = self.impose_icbc(y_hat) 
+        #print(U_full)
+        #print(y_true)
         if physics_loss:
             # Compute B-spline derivatives (t, x, and x^2 derivatives)
             B_s_t, B_s_x, B_s_xx = compute_bspline_derivatives(U_full, 
@@ -161,16 +122,26 @@ class bsnet_train(base_run):
         tch_lmbda = torch.tensor(self.lmbda_train).reshape(-1,1)
         
         #calculate ground truth
-        scenario_gt = self.build_scenario(self.lmbda_train)
+        if data_loss_cadenc<=0 or data_loss_weight<=0:
+            # do not calculate ground trouth if data loss is not being used.
+            # set to zero
+            scenario_gt = [torch.zeros(1,1) for i in self.lmbda_train]
+            data_loss_weight = 0
+            data_loss_cadenc = np.pi
+        else:
+            scenario_gt = self.build_scenario(self.lmbda_train)
         
         
         logger.info(" Training loop commences")
         
 
         min_loss = 1e12
+        isSaved = False
                     
         for epoch in range(self.model_params.get('max_epochs')):
-            loss=0
+            sum_tloss=0
+            sum_ploss=0
+            sum_dloss=0
         
             use_physics = (epoch%phys_loss_cadenc)==0
             use_data = (epoch%data_loss_cadenc)==0
@@ -186,20 +157,25 @@ class bsnet_train(base_run):
                                   use_data, 
                                   phys_loss_weight, 
                                   data_loss_weight)
-                loss += tloss
+                sum_tloss += tloss
+                sum_ploss += ploss
+                sum_dloss += dloss
                 
 
-            loss.backward()
+            sum_tloss.backward()
             self.optimizer.step()
             
-            if min_loss*0.9> (loss.item()-1e-8):
-                print(min_loss, loss.item())
-                self.save_checkpoint(loss)
-                min_loss = loss.item()
+            if min_loss*0.9> (sum_tloss.item()-1e-8):
+                if epoch> self.model_params.get("max_epochs")//10 or not isSaved:
+                    self.save_checkpoint(sum_tloss)
+                    isSaved =True
+                min_loss = sum_tloss.item()
                 
             if (epoch-1)%newline_rate==0:
                 print()
-            print(f"{epoch+1:05d} total_loss = {loss.item():2.5f}, physics_loss = {ploss:2.5f}, data_loss = {dloss:2.5f} min_loss {min_loss}", end="\r")
+            print(f" {epoch+1:05d} total_loss = {sum_tloss.item():2.5f},"+
+                  f" physics_loss = {sum_ploss:2.7f}, data_loss = {sum_dloss:2.7f}"+
+                  f" min_loss {min_loss:2.7f}", end="\r")
         print()
         
     def visualize(self):
@@ -210,10 +186,11 @@ class bsnet_train(base_run):
             raise ValueError("need attribute checkpoint")
         
         
+        logger.info("--- Visualize  ---")
         self.model = self.model.eval()
+        self.load_checkpoint()
         
         with torch.no_grad():
-            logger.info("--- Visualize  ---")
             
             # After training, test the network with a different lambda value
             y_hat = self.model(torch.tensor([[self.vis_lmbda]], dtype=torch.float32))
@@ -241,7 +218,7 @@ class bsnet_train(base_run):
             # Plot the predicted B-spline surface
             ax1 = fig.add_subplot(132, projection='3d')
             ax1.plot_surface(X, Y, y_hat_surface, cmap='viridis', edgecolor='none')
-            ax1.set_title('B-spline Surface Prediction with Lambda = 1.5')
+            ax1.set_title(f'B-spline Surface Prediction with Lambda = {self.vis_lmbda}')
             ax1.set_xlabel('x')
             ax1.set_ylabel('T')
             ax1.set_zlabel('F(x,t)')
