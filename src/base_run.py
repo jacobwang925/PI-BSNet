@@ -22,7 +22,6 @@ schema = {
     "type": "object",
     "properties": {
         "T": {"type": "integer"},
-        "L": {"type": "integer"},
         "min_T": {"type": "number"},
         "max_T": {"type": "number"},
         "min_X": {"type": "number"},
@@ -55,7 +54,7 @@ schema = {
             }
     },
     
-    "required": ["T", "L", "min_T", "max_T", "min_X", "max_X"]
+    "required": ["T",  "min_T", "max_T", "min_X", "max_X"]
 }
 
 
@@ -166,9 +165,10 @@ class base_run(ABC):
         checkpoint_path = Path(self.save_path) / checkpoint_filename
         torch.save({"model_state_dict":self.model.state_dict(),
                     }, checkpoint_path)
-        logger.info(f"Checkpoint saved: {checkpoint_path}")
+        logger.info(f"Checkpoint saved: {checkpoint_path}\n")
         
-    def load_checkpoint(self, checkpoint):
-        checkpoint = torch.load(checkpoint, weights_only =True)
+    def load_checkpoint(self):
+        logger.info(f"  Loading checkpoint: {self.checkpoint}\n")
+        checkpoint = torch.load(self.checkpoint, weights_only =True)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         
