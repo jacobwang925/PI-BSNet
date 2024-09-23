@@ -28,7 +28,7 @@ class bsnet_train(base_run):
         
         for li in lmbda:
             logger.info(f"   ...building scenario for lambda = {li}")
-            ret_gt.append(ground_truth(self.x, self.t, self.a, li))
+            ret_gt.append(ground_truth(self.x, self.t, self.max_X, li))
         return ret_gt
 
     def make_surface(self, inner_matrix):
@@ -173,7 +173,7 @@ class bsnet_train(base_run):
             y_hat_surface = self.make_surface(U_full)
 
             # Generate ground truth data for the testing lambda
-            y_true_surface = ground_truth(self.x, self.t, self.a, vis_lmbda)
+            y_true_surface = ground_truth(self.x, self.t, self.max_X, vis_lmbda)
 
             # Compute the prediction error
             error_surface = np.abs(y_hat_surface - y_true_surface)
@@ -206,11 +206,84 @@ class bsnet_train(base_run):
             ax2.set_ylabel('T')
             ax2.set_zlabel('Error')
 
-
             plt.savefig("test.png")
             plt.show()
             
-     
+    def test(self, config, with_train =False, **kwargs):
+    
+        #setup from config file
+        self.setup(config, **kwargs)    
+        if not self.is_configured:
+            logger.warning("Is not configured.")
+            return
+        
+        if self.__getattribute__("checkpoint") is None:
+            logger.error("no checkpoint for training")
+            exit()
+            
+        self.model = self.model.eval()
+        
+        #build datasets and dataloaders
+        fig = plt.figure(figsize=(6, 5))
+        ax0 = fig.add_subplot(111)
+        if with_train:
+            train_lmda = torch.tensor(self.lmbda_train).reshape(-1,1).to(torch.float32)
+            y_tru_train = torch.stack(self.build_scenario(self.lmbda_train), dim=0)
+            train_ds = torch.utils.data.TensorDataset(train_lmda, y_tru_train)
+            train_dl = torch.utils.data.DataLoader(train_ds, batch_size = 1, shuffle = False)
+            mse_y_train_mean = []
+            mse_y_train_std = []
+            for x, y in train_dl:
+                u_hat = self.model(x)
+                u_hat = self.impose_icbc(u_hat)
+                y_hat = self.make_surface(u_hat)
+                
+                mse_y_train_mean.append( torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+                mse_y_train_std.append(torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+            
+            
+            ax0.errorbar(self.lmbda_train, mse_y_train_mean, 
+                     yerr=mse_y_train_std,ecolor='gray', 
+                     capsize=8,
+                     ls='none')
+            ax0.scatter(self.lmbda_train, mse_y_train_mean, 
+                     color = "k", s=12,
+                     label = "Train") 
+            
+        test_lmda = torch.tensor(self.lmbda_test).reshape(-1,1).to(torch.float32)            
+        y_tru_test = torch.stack(self.build_scenario(self.lmbda_test), dim=0)
+        test_ds = torch.utils.data.TensorDataset(test_lmda, y_tru_test)
+        test_dl = torch.utils.data.DataLoader(test_ds, batch_size = 1, shuffle = False) 
+        mse_y_test_mean = []
+        mse_y_test_std = []    
+        for x, y in test_dl:
+            u_hat = self.model(x)
+            u_hat = self.impose_icbc(u_hat)
+            y_hat = self.make_surface(u_hat)
+            
+            mse_y_test_mean.append( torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+            mse_y_test_std.append(torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+           
+        ax0.errorbar(self.lmbda_test, mse_y_test_mean, 
+                     yerr=mse_y_test_std,ecolor='gray', 
+                     capsize=8,
+                     ls='none') 
+        
+        ax0.scatter(self.lmbda_test, mse_y_test_mean, 
+                     color = "red", s=12,
+                     label = "Test") 
+        ax0.legend()
+        ax0.set_xlabel("$\lambda$", fontsize=18)
+        ax0.set_ylabel("mean square error", fontsize=18)
+        
+        plt.show()
+        
+        
+
+        
+            
+            
+             
 if __name__ =="__main__":
     fire.Fire(bsnet_train)
     logger.info("Done")
