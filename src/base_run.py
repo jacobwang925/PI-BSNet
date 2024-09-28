@@ -53,7 +53,7 @@ schema = {
             }
     },
     
-    "required": ["T",  "min_T", "max_T", "min_X", "max_X", "bspline_order"]
+    "required": [ "min_T", "max_T", "min_X", "max_X", "bspline_order"]
 }
 
 
@@ -223,7 +223,8 @@ class base_run(ABC):
                     "hidden_depth":    self.model_params.get("hidden_depth"), 
                     "conv2d":          self.model_params.get("conv2d")
                     }, checkpoint_path)
-        logger.info(f"\nCheckpoint saved: {checkpoint_path}")
+        print()
+        logger.info(f"Checkpoint saved: {checkpoint_path}")
         
     def load_checkpoint(self, checkpoint):
         logger.info(f"  Loading checkpoint: {checkpoint}\n")

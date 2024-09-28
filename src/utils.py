@@ -136,7 +136,7 @@ def compute_bspline_derivatives(U_full, Bit_t, Bit_x, Bit_t_derivative, Bit_x_de
 
     return B_surface_t, B_surface_x, B_surface_xx
 
-def compute_bspline_surface_precomputed_3d(U_full, Bit_t, Bit_x, Bit_y, Bit_z,
+def compute_bspline_derivatives_3d(U_full, Bit_t, Bit_x, Bit_y, Bit_z,
 
                                             Bit_t_derivative, Bit_x_derivative, Bit_y_derivative, Bit_z_derivative, Bit_x_pp,
 

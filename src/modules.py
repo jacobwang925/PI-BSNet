@@ -82,7 +82,7 @@ class ControlPointNet3D(nn.Module):
         x = torch.relu(self.fc3(x))
         x = self.fc4(x)
         #x = torch.sigmoid(x)
-        C0, x = x[:,-n_cp_t+1:], x[:, :-n_cp_t+1]
+        C0, x = x[:,-self.n_cp_t+1:], x[:, :-self.n_cp_t+1]
         C0 = torch.sigmoid(C0)
 
         x = x.view(-1, self.n_cp_t-1, self.n_cp_x*self.n_cp_y*self.n_cp_z)
