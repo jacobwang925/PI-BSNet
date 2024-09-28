@@ -136,6 +136,33 @@ def compute_bspline_derivatives(U_full, Bit_t, Bit_x, Bit_t_derivative, Bit_x_de
 
     return B_surface_t, B_surface_x, B_surface_xx
 
+def compute_bspline_derivatives_3d(U_full, Bit_t, Bit_x, Bit_y, Bit_z,
+
+                                            Bit_t_derivative, Bit_x_derivative, Bit_y_derivative, Bit_z_derivative, Bit_x_pp,
+
+                                            Bit_y_pp, Bit_z_pp):
+
+    #Jasmine's faster version of the code below.
+    if U_full.ndim <5:
+      U_full = U_full.reshape(1,*U_full.shape)
+
+    # Compute the surface and its derivatives
+    B_surface = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t, Bit_x, Bit_y, Bit_z)
+    B_surface_t = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t_derivative, Bit_x, Bit_y, Bit_z)
+    B_surface_x = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t, Bit_x_derivative, Bit_y, Bit_z)
+    B_surface_y = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t, Bit_x, Bit_y_derivative, Bit_z)
+    B_surface_z = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t, Bit_x, Bit_y, Bit_z_derivative)
+    B_surface_xx = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t, Bit_x_pp, Bit_y, Bit_z)
+    B_surface_yy = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t, Bit_x, Bit_y_pp, Bit_z)
+    B_surface_zz = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', U_full, Bit_t, Bit_x, Bit_y, Bit_z_pp)
+
+    # Laplacian (sum of second derivatives in each spatial direction)
+    B_surface_laplacian = B_surface_xx + B_surface_yy + B_surface_zz
+
+
+    return B_surface, B_surface_t, B_surface_x, B_surface_y, B_surface_z, B_surface_laplacian
+
+
 # Compute B-spline derivatives of the surface and apply weighting to the physics loss
 def compute_weighted_physics_loss(U_full, Bit_t, Bit_x, Bit_t_derivative, Bit_x_derivative, Bit_t_second_derivative, Bit_x_second_derivative, lambda_train, x, t):
     # Compute B-spline derivatives (t, x, and x^2 derivatives)

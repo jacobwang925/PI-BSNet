@@ -36,6 +36,22 @@ class bsnet_train(base_run):
         y_true = torch.matmul(torch.matmul(self.Bit_t, inner_matrix), self.Bit_x.T)
         return y_true
     
+            
+    def impose_icbc(self, y):
+       
+        U = torch.ones((self.n_ctrl_pts_time, self.n_ctrl_pts_state)) 
+        for v in self.icbc:
+            dim = int(v[0])
+            idx = int(v[1])
+            val = v[2]
+            # Create a slice object for each dimension
+            slices = [slice(None)] * U.dim()
+            slices[dim] = idx
+            U[tuple(slices)] = val 
+        
+        U[1:, :-1] = y 
+        
+        return U
     def loss(self,y_hat, y_true , lmbda, physics_loss = True, data_loss=True, physics_loss_weight=1.0, data_w=1.0):
         loss = 0
         ploss = 0
