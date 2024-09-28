@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from utils import ground_truth, BsKnots, BsKnots_derivatives, compute_bspline_derivatives
-from modules import ControlPointNet
+from modules import ControlPointNet, ControlPointNet3D
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -87,37 +87,83 @@ class base_run(ABC):
         #overwrite from command line
         for name, value in kwargs.items():
             self.__setattr__(name, value)
-         
+        
+        if hasattr(self, "dimension"): 
+            if self.dimension ==1:
+                logger.info("Solving 1D problem")
+            elif self.dimension ==3:
+                logger.info("Solving 3D problem")
+            else:
+                raise NotImplementedError("must have 1 or 3 dimensions")
+        else:
+            raise NotImplementedError("Problem dimension not specified")
+        
+        
         self.save_prefix = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Generate B-spline basis matrices
         self.t = torch.linspace(self.min_T, self.max_T, self.n_points)
-        self.x = torch.linspace(self.min_X, self.max_X, self.n_points)
-        self.tk_t, self.Ln_t, self.Bit_t = BsKnots(self.n_ctrl_pts_time, 
-                                                   self.bspline_order, 
-                                                   self.n_points)
-        self.tk_x, self.Ln_x, self.Bit_x = BsKnots(self.n_ctrl_pts_state, 
-                                                   self.bspline_order, 
-                                                   self.n_points)
-
-
-        # Derivatives of the B-spline basis matrices
+        x = torch.linspace(self.min_X, self.max_X, self.n_points)
+        self.tk_t, self.Ln_t, self.Bit_t = BsKnots(self.n_ctrl_pts_time, self.bspline_order, self.n_points)
+    
+        tk_x, Ln_x, Bit_x = BsKnots(self.n_ctrl_pts_state, self.bspline_order, self.n_points)
+        
         self.Bit_t_derivative, self.Bit_t_second_derivative = BsKnots_derivatives(self.n_ctrl_pts_time,
                                                                         self.bspline_order, 
                                                                         len(self.t), 
                                                                         self.Ln_t, 
                                                                         self.tk_t)
-        self.Bit_x_derivative, self.Bit_x_second_derivative = BsKnots_derivatives(self.n_ctrl_pts_state,
+        Bit_x_derivative, Bit_x_second_derivative = BsKnots_derivatives(self.n_ctrl_pts_state,
                                                                         self.bspline_order, 
-                                                                        len(self.x), 
-                                                                        self.Ln_x, 
-                                                                        self.tk_x)
+                                                                        len(x), 
+                                                                        Ln_x, 
+                                                                        tk_x)
+        for i in 'xyz'[:self.dimension]:
+            self.__setattr__(i,x)
+            self.__setattr__(f'tk_{i}', tk_x)
+            self.__setattr__(f'Ln_{i}', Ln_x)
+            self.__setattr__(f'Bit_{i}', Bit_x)
+            self.__setattr__(f'Bit_{i}_derivative', Bit_x_derivative)
+            self.__setattr__(f'Bit_{i}_second_derivative', Bit_x_second_derivative)
+                
+        # Model Creation
+        if self.dimension ==1:
+            self.model = ControlPointNet(self.n_ctrl_pts_state,
+                                        self.n_ctrl_pts_time, 
+                                        self.model_params.get("hidden_dim"), 
+                                        self.model_params.get("hidden_depth"), 
+                                        self.model_params.get("conv2d"))
+            
+            #load_data
+            if type(self.lmbda_train) == str:
+                numpy_file = Path(self.lmbda_train)
+                if numpy_file.is_file():
+                    self.lmbda_train = np.load(numpy_file) 
+                else:
+                    logger.warning(f"training lambda file: {self.lmbda_train} does not exist")
+                    self.lmbda_train = False
+            else:
+                self.lmbda_train = np.array(self.lmbda_train)
+            
         
-        #create_model
-        self.model = ControlPointNet(self.n_ctrl_pts_state,
-                                     self.n_ctrl_pts_time, 
-                                     self.model_params.get("hidden_dim"), 
-                                     self.model_params.get("hidden_depth"), 
-                                     self.model_params.get("conv2d"))
+            if type(self.lmbda_test) == str:
+                numpy_file = Path(self.lmbda_test)
+                if numpy_file.is_file():
+                    self.lmbda_test = np.load(numpy_file) 
+                else:
+                    logger.warning(f"training lambda file: {self.lmbda_test} does not exist")
+                    self.lmbda_test = False
+            else:
+                self.lmbda_test = np.array(self.lmbda_test)
+                
+        if self.dimension ==3:
+            self.model = ControlPointNet3D(self.n_ctrl_pts_time,
+                                         self.n_ctrl_pts_state,
+                                         self.n_ctrl_pts_state,
+                                         self.n_ctrl_pts_state,
+                                        self.model_params.get("hidden_dim"))
+        
+        
+        # Optimizer    
         if self.model_params.get("optimizer").lower() =="adam":
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.model_params.get("learning_rate"))
             self.optim_needs_closure = False
@@ -134,27 +180,7 @@ class base_run(ABC):
             self.load_checkpoint(self.__getattribute__("checkpoint"))
         
         
-        #load_data
-        if type(self.lmbda_train) == str:
-            numpy_file = Path(self.lmbda_train)
-            if numpy_file.is_file():
-                self.lmbda_train = np.load(numpy_file) 
-            else:
-                logger.warning(f"training lambda file: {self.lmbda_train} does not exist")
-                self.lmbda_train = False
-        else:
-            self.lmbda_train = np.array(self.lmbda_train)
-        
-    
-        if type(self.lmbda_test) == str:
-            numpy_file = Path(self.lmbda_test)
-            if numpy_file.is_file():
-                self.lmbda_test = np.load(numpy_file) 
-            else:
-                logger.warning(f"training lambda file: {self.lmbda_test} does not exist")
-                self.lmbda_test = False
-        else:
-            self.lmbda_test = np.array(self.lmbda_test)
+
     
         #print to visually inspect.
         self.print_attributes()
@@ -171,22 +197,7 @@ class base_run(ABC):
                 
             logger.info(f"{' '*l}{name}:  {value}")   
             
-        
-    def impose_icbc(self, y):
-       
-        U = torch.ones((self.n_ctrl_pts_time, self.n_ctrl_pts_state)) 
-        for v in self.icbc:
-            dim = int(v[0])
-            idx = int(v[1])
-            val = v[2]
-            # Create a slice object for each dimension
-            slices = [slice(None)] * U.dim()
-            slices[dim] = idx
-            U[tuple(slices)] = val 
-        
-        U[1:, :-1] = y 
-        
-        return U
+
     
     @abstractmethod
     def loss(self,y_hat, y_true , lmbda, physics_loss = True, data_loss=True, physics_loss_weight=1.0, data_loss_weight=1.0):
