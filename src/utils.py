@@ -33,7 +33,9 @@ def BsKnots(n_cp, d, Ns):
     for j in range(n_cp):
         for i in range(Ns):
             Bit[i, j] = BsFun(j + 1, d, tk[i], Ln)
-
+    
+    Bit[Ns - 1, n_cp - 1] = 1
+    
     return tk, Ln, Bit
 
 # B-spline derivative basis function (first derivative)
