@@ -28,7 +28,7 @@ class bsnet_train(base_run):
         
         for li in lmbda:
             logger.info(f"   ...building scenario for lambda = {li}")
-            ret_gt.append(ground_truth(self.x, self.t, self.a, li))
+            ret_gt.append(ground_truth(self.x, self.t, self.max_X, li))
         return ret_gt
 
     def make_surface(self, inner_matrix):
@@ -36,169 +36,144 @@ class bsnet_train(base_run):
         y_true = torch.matmul(torch.matmul(self.Bit_t, inner_matrix), self.Bit_x.T)
         return y_true
     
-    def run(self, config, cmd = 'train', **kwargs):
-        
-        #setup from config file
-        self.setup(config)    
-        
-        if type(self.lmbda_train) == str:
-            train_lambda_numpy_file = Path(self.lmbda_train)
-            if train_lambda_numpy_file.is_file():
-                self.lmbda_train = np.load(train_lambda_numpy_file) 
-            else:
-                raise ValueError(f"training lambda file: {self.lmbda_train} does not exist")
-        else:
-            self.lmbda_train = np.array(self.lmbda_train)
-            
-        if not self.is_configured:
-            logger.warning("Is not configured.")
-            return
-        
-        #overwrite from command line
-        for name, value in kwargs.items():
-            self.__setattr__(name, value)
-        
-        #print to visually inspect.
-        self.print_attributes()
-        
-        if cmd.lower() == 'train':
-            self.train()
-        elif cmd.lower() == 'visualize':
-            self.visualize()
-        else:
-            logger.warning(f"uninterpretable command {cmd}")
-    
-    def loss(self,y_hat, y_true , lmbda, physics_loss = True, data_loss=True, physics_loss_weight=1.0, data_loss_weight=1.0):
+    def loss(self,y_hat, y_true , lmbda, physics_loss = True, data_loss=True, physics_loss_weight=1.0, data_w=1.0):
         loss = 0
         ploss = 0
         dloss = 0
-        U_full = self.impose_icbc(y_hat) 
-        #print(U_full)
-        #print(y_true)
+        U_full = torch.stack([self.impose_icbc(y_hat[i]) for i in range(y_hat.shape[0])], dim=0)  
         if physics_loss:
-            # Compute B-spline derivatives (t, x, and x^2 derivatives)
-            B_s_t, B_s_x, B_s_xx = compute_bspline_derivatives(U_full, 
-                                                                self.Bit_t, 
-                                                                self.Bit_x, 
-                                                                self.Bit_t_derivative,
-                                                                self.Bit_x_derivative,
-                                                                self.Bit_t_second_derivative, 
-                                                                self.Bit_x_second_derivative)
-            pde_residual = self.pde_residual(B_s_t=B_s_t, 
-                                             B_s_x=B_s_x, 
-                                             B_s_xx= B_s_xx, 
-                                             lmbda = lmbda)
-            physics_loss = torch.mean(torch.pow(pde_residual,2))
+            pde_residuals = []
+            for i in range(y_hat.shape[0]):
+                # Compute B-spline derivatives (t, x, and x^2 derivatives)
+                B_s_t, B_s_x, B_s_xx = compute_bspline_derivatives(U_full[i], 
+                                                                    self.Bit_t, 
+                                                                    self.Bit_x, 
+                                                                    self.Bit_t_derivative,
+                                                                    self.Bit_x_derivative,
+                                                                    self.Bit_t_second_derivative, 
+                                                                    self.Bit_x_second_derivative)
+                pde_residuals.append(self.pde_residual(B_s_t=B_s_t, 
+                                                B_s_x=B_s_x, 
+                                                B_s_xx= B_s_xx, 
+                                                lmbda = lmbda[i]))
+                
+            physics_loss = torch.mean(torch.pow(torch.hstack(pde_residuals),2))
             ploss = physics_loss.detach()
+                
             loss +=physics_loss*physics_loss_weight
             
         if data_loss:
-            m_hat = self.make_surface(U_full)
-            data_loss = torch.mean(torch.pow(y_true- m_hat,2))
-            loss +=data_loss*data_loss_weight
-            dloss = data_loss.detach()
+            data_loss =0
+            for i in range(y_hat.shape[0]):
+                m_hat = self.make_surface(U_full[i])
+                data_loss += torch.pow(y_true[i]- m_hat,2)
+            loss +=torch.mean(data_loss)*data_w
+            dloss = torch.mean(data_loss).detach()
             
         return loss, ploss, dloss
         
-    def train(self):
+    def train(self, config, **kwargs):
         logger.info("--- Train ---")
+        #setup from config file
+        self.setup(config, **kwargs)    
         
+        self.model = self.model.train()
+        
+        if not self.is_configured:
+            logger.warning("Is not configured.")
+            return
+    
         # loss configuration
-        phys_loss_params= self.loss_params.get("physics_loss")
-        phys_loss_cadenc = phys_loss_params.get("cadence")
-        phys_loss_weight = phys_loss_params.get("weight")
-        data_loss_params= self.loss_params.get("data_loss")
-        data_loss_cadenc = data_loss_params.get("cadence")
-        data_loss_weight = data_loss_params.get("weight")
+        phys_params= self.loss_params.get("physics_loss")
+        phys_c = phys_params.get("cadence")
+        phys_w = phys_params.get("weight")
+        data_params= self.loss_params.get("data_loss")
+        data_c = data_params.get("cadence")
+        data_w = data_params.get("weight")
         
         #how often to newline print_outs
-        newline_rate = max(100, phys_loss_cadenc*data_loss_cadenc)
+        newline_rate = max(100, phys_c*data_c)
         
-        if min(phys_loss_cadenc, data_loss_cadenc)>1:
+        if min(phys_c, data_c)>1:
             logger.warning("At least one of either physics or data must be used for loss every epoch")
-            phys_loss_cadenc = 1
+            phys_c = 1
         
-        #reshape lambdas and make into torch tesnor.
-        tch_lmbda = torch.tensor(self.lmbda_train).reshape(-1,1)
+        #reshape lambdas and make into torch tensor.
+        lmd = torch.tensor(self.lmbda_train).reshape(-1,1)
         
         #calculate ground truth
-        if data_loss_cadenc<=0 or data_loss_weight<=0:
+        if data_c<=0 or data_w<=0:
             # do not calculate ground trouth if data loss is not being used.
             # set to zero
-            scenario_gt = [torch.zeros(1,1) for i in self.lmbda_train]
-            data_loss_weight = 0
-            data_loss_cadenc = np.pi
+            y_tru = [torch.zeros(1,1) for i in self.lmbda_train]
+            data_w, data_c = 0, np.pi
         else:
-            scenario_gt = self.build_scenario(self.lmbda_train)
+            y_tru = self.build_scenario(self.lmbda_train)
         
         
         logger.info(" Training loop commences")
-        
-
         min_loss = 1e12
         isSaved = False
                     
         for epoch in range(self.model_params.get('max_epochs')):
-            sum_tloss=0
-            sum_ploss=0
-            sum_dloss=0
         
-            use_physics = (epoch%phys_loss_cadenc)==0
-            use_data = (epoch%data_loss_cadenc)==0
-            
-            for y_true, lmbda in zip(scenario_gt, tch_lmbda ):
+            use_phys = (epoch%phys_c)==0
+            use_data = (epoch%data_c)==0
+            if not self.optim_needs_closure:
                 self.optimizer.zero_grad()
-                y_hat = self.model(lmbda)
                 
-                tloss, ploss, dloss = self.loss(y_hat, 
-                                  y_true, 
-                                  lmbda, 
-                                  use_physics, 
-                                  use_data, 
-                                  phys_loss_weight, 
-                                  data_loss_weight)
-                sum_tloss += tloss
-                sum_ploss += ploss
-                sum_dloss += dloss
-                
-
-            sum_tloss.backward()
-            self.optimizer.step()
+            u_hat = self.model(lmd)
             
-            if min_loss*0.9> (sum_tloss.item()-1e-8):
+            tloss, ploss, dloss = self.loss(u_hat, y_tru, lmd, use_phys, use_data, phys_w, data_w)
+                
+            if self.optim_needs_closure:
+                def closure():
+                    self.optimizer.zero_grad()
+                    
+                    u_hat = self.model(lmd) 
+                    tloss, _, _ = self.loss(u_hat,  y_tru, lmd, use_phys,  use_data,  phys_w, data_w)
+                    tloss.backward()  
+                    return tloss
+                self.optimizer.step(closure) 
+            else:
+                tloss.backward()
+                self.optimizer.step()
+                
+            if min_loss*0.9> (tloss.item()-1e-8):
                 if epoch> self.model_params.get("max_epochs")//10 or not isSaved:
-                    self.save_checkpoint(sum_tloss)
+                    self.save_checkpoint(tloss)
                     isSaved =True
-                min_loss = sum_tloss.item()
+                    min_loss = tloss.item()
                 
             if (epoch-1)%newline_rate==0:
                 print()
-            print(f" {epoch+1:05d} total_loss = {sum_tloss.item():2.5f},"+
-                  f" physics_loss = {sum_ploss:2.7f}, data_loss = {sum_dloss:2.7f}"+
+            print(f" {epoch+1:05d} total_loss = {tloss.item():2.5f},"+
+                  f" physics_loss = {ploss:2.7f}, data_loss = {dloss:2.7f}"+
                   f" min_loss {min_loss:2.7f}", end="\r")
         print()
         
-    def visualize(self):
-        if not self.__getattribute__("vis_lmbda"):
-            raise ValueError("need attribute vis_lmbda")
-        
-        if not self.__getattribute__("checkpoint"):
-            raise ValueError("need attribute checkpoint")
-        
-        
+    def visualize(self, config, vis_lmbda, **kwargs):
         logger.info("--- Visualize  ---")
+       
+        #setup from config file
+        self.setup(config, **kwargs)    
+        if not self.is_configured:
+            logger.warning("Is not configured.")
+            return
+       
+            
         self.model = self.model.eval()
-        self.load_checkpoint()
+        #self.load_checkpoint(self.checkpoint)
         
         with torch.no_grad():
             
             # After training, test the network with a different lambda value
-            y_hat = self.model(torch.tensor([[self.vis_lmbda]], dtype=torch.float32))
+            y_hat = self.model(torch.tensor([[vis_lmbda]], dtype=torch.float32))
             U_full = self.impose_icbc(y_hat)
             y_hat_surface = self.make_surface(U_full)
 
             # Generate ground truth data for the testing lambda
-            y_true_surface = ground_truth(self.x, self.t, self.a, self.vis_lmbda)
+            y_true_surface = ground_truth(self.x, self.t, self.max_X, vis_lmbda)
 
             # Compute the prediction error
             error_surface = np.abs(y_hat_surface - y_true_surface)
@@ -218,7 +193,7 @@ class bsnet_train(base_run):
             # Plot the predicted B-spline surface
             ax1 = fig.add_subplot(132, projection='3d')
             ax1.plot_surface(X, Y, y_hat_surface, cmap='viridis', edgecolor='none')
-            ax1.set_title(f'B-spline Surface Prediction with Lambda = {self.vis_lmbda}')
+            ax1.set_title(f'B-spline Surface Prediction with Lambda = {vis_lmbda}')
             ax1.set_xlabel('x')
             ax1.set_ylabel('T')
             ax1.set_zlabel('F(x,t)')
@@ -231,14 +206,84 @@ class bsnet_train(base_run):
             ax2.set_ylabel('T')
             ax2.set_zlabel('Error')
 
-
             plt.savefig("test.png")
             plt.show()
-
-    
-    
-
             
+    def test(self, config, with_train =False, **kwargs):
+    
+        #setup from config file
+        self.setup(config, **kwargs)    
+        if not self.is_configured:
+            logger.warning("Is not configured.")
+            return
+        
+        if self.__getattribute__("checkpoint") is None:
+            logger.error("no checkpoint for training")
+            exit()
+            
+        self.model = self.model.eval()
+        
+        #build datasets and dataloaders
+        fig = plt.figure(figsize=(6, 5))
+        ax0 = fig.add_subplot(111)
+        if with_train:
+            train_lmda = torch.tensor(self.lmbda_train).reshape(-1,1).to(torch.float32)
+            y_tru_train = torch.stack(self.build_scenario(self.lmbda_train), dim=0)
+            train_ds = torch.utils.data.TensorDataset(train_lmda, y_tru_train)
+            train_dl = torch.utils.data.DataLoader(train_ds, batch_size = 1, shuffle = False)
+            mse_y_train_mean = []
+            mse_y_train_std = []
+            for x, y in train_dl:
+                u_hat = self.model(x)
+                u_hat = self.impose_icbc(u_hat)
+                y_hat = self.make_surface(u_hat)
+                
+                mse_y_train_mean.append( torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+                mse_y_train_std.append(torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+            
+            
+            ax0.errorbar(self.lmbda_train, mse_y_train_mean, 
+                     yerr=mse_y_train_std,ecolor='gray', 
+                     capsize=8,
+                     ls='none')
+            ax0.scatter(self.lmbda_train, mse_y_train_mean, 
+                     color = "k", s=12,
+                     label = "Train") 
+            
+        test_lmda = torch.tensor(self.lmbda_test).reshape(-1,1).to(torch.float32)            
+        y_tru_test = torch.stack(self.build_scenario(self.lmbda_test), dim=0)
+        test_ds = torch.utils.data.TensorDataset(test_lmda, y_tru_test)
+        test_dl = torch.utils.data.DataLoader(test_ds, batch_size = 1, shuffle = False) 
+        mse_y_test_mean = []
+        mse_y_test_std = []    
+        for x, y in test_dl:
+            u_hat = self.model(x)
+            u_hat = self.impose_icbc(u_hat)
+            y_hat = self.make_surface(u_hat)
+            
+            mse_y_test_mean.append( torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+            mse_y_test_std.append(torch.mean(torch.pow(y-y_hat,2)).detach().numpy())
+           
+        ax0.errorbar(self.lmbda_test, mse_y_test_mean, 
+                     yerr=mse_y_test_std,ecolor='gray', 
+                     capsize=8,
+                     ls='none') 
+        
+        ax0.scatter(self.lmbda_test, mse_y_test_mean, 
+                     color = "red", s=12,
+                     label = "Test") 
+        ax0.legend()
+        ax0.set_xlabel("$\lambda$", fontsize=18)
+        ax0.set_ylabel("mean square error", fontsize=18)
+        
+        plt.show()
+        
+        
+
+        
+            
+            
+             
 if __name__ =="__main__":
     fire.Fire(bsnet_train)
     logger.info("Done")
