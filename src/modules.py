@@ -67,27 +67,32 @@ class ControlPointNet3D(nn.Module):
     def __init__(self, n_cp_x, n_cp_y, n_cp_z, n_cp_t, hidden_dim=128):
         super(ControlPointNet3D, self).__init__()
         self.fc1 = nn.Linear(4, hidden_dim)
-        #self.fc2 = nn.Linear(hidden_dim,hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim,hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, hidden_dim)
         # Predict control points for the entire grid except for the initial time step
-        self.fc4 = nn.Linear(hidden_dim, (n_cp_x) * (n_cp_y) * (n_cp_z) * (n_cp_t - 1) + (n_cp_t -1))
+        self.fc4 = nn.Linear(hidden_dim, (n_cp_x) * (n_cp_y) * (n_cp_z) +1)
         self.n_cp_t = n_cp_t
         self.n_cp_x = n_cp_x
         self.n_cp_y = n_cp_y
         self.n_cp_z = n_cp_z
 
-    def forward(self, params):
-        x = torch.relu(self.fc1(params))
-        #x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = self.fc4(x)
-        #x = torch.sigmoid(x)
-        C0, x = x[:,-self.n_cp_t+1:], x[:, :-self.n_cp_t+1]
-        C0 = torch.sigmoid(C0)
-
-        x = x.view(-1, self.n_cp_t-1, self.n_cp_x*self.n_cp_y*self.n_cp_z)
-        x = torch.relu(x)
-
-        x = x/torch.sum(x,dim = 2, keepdim = True)
-        x = torch.einsum("ij,ijk->ijk", C0, x)
-        return x.view(-1, self.n_cp_t-1, self.n_cp_x,self.n_cp_y,self.n_cp_z)
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        output = []
+        C0 =[]
+        for i in range(self.n_cp_t-1):
+            
+            x = torch.relu(self.fc3(torch.relu(self.fc2(x))))+x
+            e = torch.relu(self.fc4(x))
+            c, e = e[:,-1:], e[:,:-1]
+            output.append(e)
+            C0.append(torch.sigmoid(c))
+            
+            
+        output = torch.stack(output, dim =1)
+        C0 = torch.hstack(C0)
+        
+        output = output.view(-1,self.n_cp_t-1,self.n_cp_x*self.n_cp_y*self.n_cp_z)
+        output = output/torch.sum(output,dim = 2, keepdim = True)
+        output = torch.einsum("ij,ijk->ijk", C0, output)
+        return output.view(-1, self.n_cp_t-1, self.n_cp_x,self.n_cp_y,self.n_cp_z)

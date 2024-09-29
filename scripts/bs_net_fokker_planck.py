@@ -23,9 +23,15 @@ class bsnet_train(base_run):
         self.__setattr__("is_configured", False)
     
     def pde_residual(self, **kwargs):
-        pde_residual =kwargs["B_s_t"] -0.001* kwargs["B_s_xx"]
+        res1 = kwargs["B_s_t"] -0.001* kwargs["B_s_xx"]
+        #dx = torch.sum(kwargs["B_s_x"][:,:,:,:,0] - kwargs["B_s_x"][:,:,:,:,-1], axis = (2,3))
+        #dy = torch.sum(kwargs["B_s_y"][:,:,:,:,0] - kwargs["B_s_y"][:,:,:,:,-1], axis = (2,3))
+        #dz = torch.sum(kwargs["B_s_z"][:,:,:,:,0] - kwargs["B_s_z"][:,:,:,:,-1], axis = (2,3))
+        #dt = torch.sum(kwargs["B_s_t"], axis=(2,3,4))
+        #res2 =  dt - dx -dy - dz
+        #        res3 =  kwargs["B_s_t"] - kwargs["B_s_x"] - kwargs["B_s_y"] - kwargs["B_s_z"]
 
-        return pde_residual
+        return res1#, res2
     def gaussian_pdf(self,center, width):
         x = torch.linspace(self.min_X, self.max_X, self.n_ctrl_pts_state)
         grid_x, grid_y, grid_z = torch.meshgrid(x,x,x)
@@ -46,8 +52,8 @@ class bsnet_train(base_run):
 
     def make_surface(self, inner_matrix):
         # Generate the B-spline surface with the predicted control points
-        y_true = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', inner_matrix, self.Bit_t, self.Bit_x, self.Bit_y, self.Bit_z)
-        return y_true
+        y = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', inner_matrix, self.Bit_t, self.Bit_x, self.Bit_y, self.Bit_z)
+        return y
     
     def loss(self,y_hat, x):
         U_full = torch.zeros((x.shape[0],
@@ -65,10 +71,14 @@ class bsnet_train(base_run):
                                                             self.Bit_t_derivative,
                                                             self.Bit_x_derivative, self.Bit_y_derivative, self.Bit_z_derivative,
                                                             self.Bit_x_second_derivative, self.Bit_y_second_derivative, self.Bit_z_second_derivative)
-        res = self.pde_residual(B_s_t=B_s_t,  
+        res1 = self.pde_residual(B_s_t=B_s_t, 
+                                B_s_x=B_s_x,
+                                B_s_y=B_s_y,
+                                B_s_z=B_s_z, 
                                 B_s_xx= B_s_xx)
         
-        physics_loss = torch.sum(torch.pow(res,2))
+        physics_loss = torch.mean(torch.sum(torch.pow(res1,2),axis = (2,3,4)))
+        #physics_loss+= torch.mean(torch.sum(torch.pow(res2,2),axis = (1)))
         return  physics_loss
             
         
@@ -86,7 +96,7 @@ class bsnet_train(base_run):
         #how often to newline print_outs
         newline_rate = 100
         
-        #reshape lambdas and make into torch tensor.
+        #reshape input and make into torch tensor.
         lmd = torch.tensor(self.lmbda_train, dtype=torch.float32)
         
         # Define the initial condition with the size of control points grid
@@ -103,7 +113,7 @@ class bsnet_train(base_run):
             self.optimizer.zero_grad()
             
             u_hat = self.model(lmd) 
-            tloss, _, _ = self.loss(u_hat, lmd)
+            tloss = self.loss(u_hat, initial_condition)
             tloss.backward()  
             return tloss
                     
