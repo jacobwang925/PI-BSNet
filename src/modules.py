@@ -61,36 +61,42 @@ class ControlPointNet(nn.Module):
             
         return x.view(-1, self.n_cp_t - 1, self.n_cp_x - 1)
     
-    
+
+def init_weights(m):
+    if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight) 
+
 # Define the neural network architecture
 class ControlPointNet3D(nn.Module):
-    def __init__(self, n_cp_x, n_cp_y, n_cp_z, n_cp_t, hidden_dim=128):
+    def __init__(self, n_cp_t,n_cp_x, n_cp_y, n_cp_z,  hidden_dim=128):
         super(ControlPointNet3D, self).__init__()
-# Define the neural network architecture
-class ControlPointNet3D(nn.Module):
-        self.fc4 = nn.Linear(hidden_dim, (n_cp_x) * (n_cp_y) * (n_cp_z) +1)
+        self.fc1 = nn.Linear(4, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        #self.fc4 = nn.Linear(hidden_dim, hidden_dim)
+        self.h2x = nn.Linear(hidden_dim, hidden_dim)
+        # Predict control points for the entire grid except for the initial time step
+        self.decode = nn.Linear(hidden_dim, 2*hidden_dim)
+        self.encode = nn.Linear(2*hidden_dim,hidden_dim)
+        
+        self.out = nn.Linear(hidden_dim, n_cp_x*n_cp_y*n_cp_z)
         self.n_cp_t = n_cp_t
         self.n_cp_x = n_cp_x
         self.n_cp_y = n_cp_y
         self.n_cp_z = n_cp_z
+        self.apply(init_weights)
 
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        output = []
-        C0 =[]
-        for i in range(self.n_cp_t-1):
-            
-            x = torch.relu(self.fc3(torch.relu(self.fc2(x))))+x
-            e = torch.relu(self.fc4(x))
-            c, e = e[:,-1:], e[:,:-1]
-            output.append(e)
-            C0.append(torch.sigmoid(c))
-            
-            
-        output = torch.stack(output, dim =1)
-        C0 = torch.hstack(C0)
+    def forward(self, par):
+        par = torch.relu(self.fc2(torch.relu(self.fc1(par))))
+        x = torch.relu(self.h2x(par))
+        output_list= []
+        for i in range(self.n_cp_t):
+            dec = torch.relu(self.decode(x))
+            enc = torch.relu(self.encode(dec))
+            x= enc +x
+            surf = self.out(x)
+            output_list.append(surf)
+            x= torch.relu(self.h2x(x))
         
-        output = output.view(-1,self.n_cp_t-1,self.n_cp_x*self.n_cp_y*self.n_cp_z)
-        output = output/torch.sum(output,dim = 2, keepdim = True)
-        output = torch.einsum("ij,ijk->ijk", C0, output)
-        return output.view(-1, self.n_cp_t-1, self.n_cp_x,self.n_cp_y,self.n_cp_z)
+        output = torch.stack(output_list, dim =1)
+        return (output.view(-1, self.n_cp_t, self.n_cp_x,self.n_cp_y,self.n_cp_z), 
+                output_list[0].reshape(-1,self.n_cp_x, self.n_cp_y, self.n_cp_z))
