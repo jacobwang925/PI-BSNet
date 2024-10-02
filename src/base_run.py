@@ -133,27 +133,7 @@ class base_run(ABC):
                                         self.model_params.get("hidden_depth"), 
                                         self.model_params.get("conv2d"))
             
-            #load_data
-            if type(self.lmbda_train) == str:
-                numpy_file = Path(self.lmbda_train)
-                if numpy_file.is_file():
-                    self.lmbda_train = np.load(numpy_file) 
-                else:
-                    logger.warning(f"training lambda file: {self.lmbda_train} does not exist")
-                    self.lmbda_train = False
-            else:
-                self.lmbda_train = np.array(self.lmbda_train)
-            
-        
-            if type(self.lmbda_test) == str:
-                numpy_file = Path(self.lmbda_test)
-                if numpy_file.is_file():
-                    self.lmbda_test = np.load(numpy_file) 
-                else:
-                    logger.warning(f"training lambda file: {self.lmbda_test} does not exist")
-                    self.lmbda_test = False
-            else:
-                self.lmbda_test = np.array(self.lmbda_test)
+
                 
         if self.dimension ==3:
             self.model = ControlPointNet3D(self.n_ctrl_pts_time,
@@ -161,8 +141,35 @@ class base_run(ABC):
                                          self.n_ctrl_pts_state,
                                          self.n_ctrl_pts_state,
                                         self.model_params.get("hidden_dim"))
+       
+        #load_data
+        if type(self.lmbda_train) == str:
+            numpy_file = Path(self.lmbda_train)
+            if numpy_file.is_file():
+                self.lmbda_train = np.load(numpy_file) 
+            else:
+                logger.warning(f"training lambda file: {self.lmbda_train} does not exist")
+                self.lmbda_train = False
+        else:
+            self.lmbda_train = np.array(self.lmbda_train)
         
         
+        self.lambda_train = torch.tensor(self.lmbda_train, dtype=torch.float32)
+        
+    
+        if type(self.lmbda_test) == str:
+            numpy_file = Path(self.lmbda_test)
+            if numpy_file.is_file():
+                self.lmbda_test = np.load(numpy_file) 
+            else:
+                logger.warning(f"training lambda file: {self.lmbda_test} does not exist")
+                self.lmbda_test = False
+        else:
+            self.lmbda_test = np.array(self.lmbda_test) 
+            
+        
+        self.lambda_test = torch.tensor(self.lmbda_test, dtype=torch.float32)
+    
         # Optimizer    
         if self.model_params.get("optimizer").lower() =="adam":
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.model_params.get("learning_rate"))
@@ -214,7 +221,7 @@ class base_run(ABC):
                 filename.unlink()
         
         # Save new checkpoint
-        checkpoint_filename = f"{self.save_prefix}_loss_{loss:.6f}.pt"
+        checkpoint_filename = f"{self.save_prefix}_loss_{loss:.8f}.pt"
         checkpoint_path = Path(self.save_path) / checkpoint_filename
         torch.save({"model_state_dict":self.model.state_dict(),
                     "n_ctrl_pts_state":self.n_ctrl_pts_state,
