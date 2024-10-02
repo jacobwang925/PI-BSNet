@@ -66,10 +66,8 @@ class ControlPointNet(nn.Module):
 class ControlPointNet3D(nn.Module):
     def __init__(self, n_cp_x, n_cp_y, n_cp_z, n_cp_t, hidden_dim=128):
         super(ControlPointNet3D, self).__init__()
-        self.fc1 = nn.Linear(4, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim,hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
-        # Predict control points for the entire grid except for the initial time step
+# Define the neural network architecture
+class ControlPointNet3D(nn.Module):
         self.fc4 = nn.Linear(hidden_dim, (n_cp_x) * (n_cp_y) * (n_cp_z) +1)
         self.n_cp_t = n_cp_t
         self.n_cp_x = n_cp_x
