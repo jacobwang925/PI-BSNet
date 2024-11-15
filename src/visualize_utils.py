@@ -26,14 +26,16 @@ def plot_all_frames(data):
         ax = axes[row, col]
 
         # Plot the data for the current frame
-        im = ax.matshow(data[frame, :, :, z_dim//2], cmap='viridis')#, vmin=global_min, vmax=global_max)
+        im = ax.matshow(
+            data[frame, :, :, z_dim // 2], cmap="viridis"
+        )  # , vmin=global_min, vmax=global_max)
 
         # Set title
-        ax.set_title(f'Frame {frame}')
-        ax.axis('off')
+        ax.set_title(f"Frame {frame}")
+        ax.axis("off")
 
     # Add a colorbar
-    fig.colorbar(im, ax=axes, orientation='vertical', fraction=0.02, pad=0.04)
+    fig.colorbar(im, ax=axes, orientation="vertical", fraction=0.02, pad=0.04)
 
     plt.tight_layout()
     plt.show()
