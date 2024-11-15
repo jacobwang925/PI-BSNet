@@ -143,7 +143,6 @@ class base_run(ABC):
                 self.n_ctrl_pts_time,
                 self.model_params.get("hidden_dim"),
                 self.model_params.get("hidden_depth"),
-                self.model_params.get("conv2d"),
             )
 
         if self.dimension == 3:
@@ -236,8 +235,7 @@ class base_run(ABC):
                 "n_ctrl_pts_state": self.n_ctrl_pts_state,
                 "n_ctrl_pts_time": self.n_ctrl_pts_time,
                 "hidden_dim": self.model_params.get("hidden_dim"),
-                "hidden_depth": self.model_params.get("hidden_depth"),
-                "conv2d": self.model_params.get("conv2d"),
+                "hidden_depth": self.model_params.get("hidden_depth")
             },
             checkpoint_path,
         )
@@ -255,14 +253,12 @@ class base_run(ABC):
                 and checkpoint.get("n_ctrl_pts_time")
                 and checkpoint.get("hidden_dim")
                 and checkpoint.get("hidden_depth")
-                and checkpoint.get("conv2d")
             ):
                 self.model = ControlPointNet(
                     checkpoint["n_ctrl_pts_state"],
                     checkpoint["n_ctrl_pts_time"],
                     checkpoint["hidden_dim"],
-                    checkpoint["hidden_depth"],
-                    checkpoint["conv2d"],
+                    checkpoint["hidden_depth"]
                 )
             self.model.load_state_dict(checkpoint["model_state_dict"])
         else:
