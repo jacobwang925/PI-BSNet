@@ -21,65 +21,127 @@ class bsnet_train(base_run):
     def __init__(self, cfg=None):
         #super(bsnet_train, base_run).__init__()
         self.__setattr__("is_configured", False)
+        self.D = 0.0001
     
     def pde_residual(self, **kwargs):
-        res1 = kwargs["B_s_t"] -0.001* kwargs["B_s_xx"]
-        #dx = torch.sum(kwargs["B_s_x"][:,:,:,:,0] - kwargs["B_s_x"][:,:,:,:,-1], axis = (2,3))
-        #dy = torch.sum(kwargs["B_s_y"][:,:,:,:,0] - kwargs["B_s_y"][:,:,:,:,-1], axis = (2,3))
-        #dz = torch.sum(kwargs["B_s_z"][:,:,:,:,0] - kwargs["B_s_z"][:,:,:,:,-1], axis = (2,3))
-        #dt = torch.sum(kwargs["B_s_t"], axis=(2,3,4))
-        #res2 =  dt - dx -dy - dz
-        #        res3 =  kwargs["B_s_t"] - kwargs["B_s_x"] - kwargs["B_s_y"] - kwargs["B_s_z"]
-
-        return res1#, res2
+        res1 = kwargs["B_s_t"] -self.D* kwargs["B_s_xx"]    
+        return res1
+    
     def gaussian_pdf(self,center, width):
         x = torch.linspace(self.min_X, self.max_X, self.n_ctrl_pts_state)
         grid_x, grid_y, grid_z = torch.meshgrid(x,x,x)
-        cx, cy, cz = center
-        ctrl_dist = torch.exp(-((grid_x - cx) ** 2 + (grid_y - cy) ** 2 + (grid_z - cz) ** 2) / (2 * width ** 2))
-        proj_U_Full = torch.einsum('ijkl,ti,xj,yk,zl->txyz', ctrl_dist.reshape(1, *ctrl_dist.shape), self.Bit_t, self.Bit_x, self.Bit_y, self.Bit_z)[0,:,:,:]
-        f = 1/torch.sum(proj_U_Full)
-        return f*ctrl_dist
+        cx, cy, cz = center[:, 0], center[:, 1], center[:, 2]
+        
+        # Reshape grid tensors to match the dimensions for broadcasting
+        cx = cx.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        cy = cy.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        cz = cz.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        grid_x = grid_x.unsqueeze(0).repeat(center.size(0), 1, 1, 1)  # Shape: (Q, n, n, n)
+        grid_y = grid_y.unsqueeze(0).repeat(center.size(0), 1, 1, 1)  # Shape: (Q, n, n, n)
+        grid_z = grid_z.unsqueeze(0).repeat(center.size(0), 1, 1, 1)  # Shape: (Q, n, n, n)
+        width = width.unsqueeze(1).unsqueeze(2)
+        
+        r2 =((grid_x - cx) ** 2 +(grid_y - cy) ** 2 + (grid_z - cz) ** 2)
+        ctrl_dist = torch.exp(-r2 / (2 * width ** 2)) #control points
+        proj_U_Full = torch.einsum('Nijk,xi,yj,zk->Nxyz', ctrl_dist, self.Bit_x, self.Bit_y, self.Bit_z)
+        f = 1/torch.sum(proj_U_Full, dim=(1,2,3))
+        return torch.einsum("ijkl,i->ijkl", ctrl_dist,f), f
     
-    def build_scenario(self, lmbda=None):
-        raise NotImplementedError("currently not implemented")
-        #ret_gt = []
-       # 
-       # for li in lmbda:
-        #    logger.info(f"   ...building scenario for lambda = {li}")
-        #    ret_gt.append(ground_truth(self.x, self.t, self.a, li))
-        return ret_gt
-
+    def estimate_true_surface_at_timestep(self, lmbda=None, time_step=1.0):
+        width= lmbda[:,3:]
+        Q  = torch.sqrt((width**2 + 2 * self.D * time_step))
+        P0,f0 = self.gaussian_pdf(lmbda[:,:3],width)
+        Pt,ft = self.gaussian_pdf(lmbda[:,:3],Q)
+        Pt = torch.einsum("ijkl,i->ijkl", Pt,f0/ft)
+        return torch.einsum("Nijk,xi,yj,zk->xyz", Pt, self.Bit_x, self.Bit_y, self.Bit_z)
+    
     def make_surface(self, inner_matrix):
         # Generate the B-spline surface with the predicted control points
-        y = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', inner_matrix, self.Bit_t, self.Bit_x, self.Bit_y, self.Bit_z)
+        if inner_matrix.ndim ==5:
+            y = torch.einsum('qijkl,ti,xj,yk,zl->qtxyz', inner_matrix, self.Bit_t, self.Bit_x, self.Bit_y, self.Bit_z)
+        if inner_matrix.ndim ==4:
+            y = torch.einsum('qjkl,xj,yk,zl->qxyz', inner_matrix, self.Bit_x, self.Bit_y, self.Bit_z)
         return y
     
-    def loss(self,y_hat, x):
-        U_full = torch.zeros((x.shape[0],
+    def loss_ic_only(self,y_hat, y_ic, ic, lmd):
+        #N= ic.shape[0]
+        #a,b = torch.max(torch.abs(ic.reshape(N,-1)), axis=1)
+        #a = a.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        
+        true_surf = self.make_surface(ic)
+        pred_surf = self.make_surface(y_ic)
+        
+        loss1 = torch.mean(((ic - y_ic)**2/(ic+.0001)**2) )
+        loss2 = torch.mean(((true_surf - pred_surf)**2/(true_surf+.0001)**2) )
+        
+        print(loss1.detach().numpy(),loss2.detach().numpy())
+        
+        return loss2
+    
+    def computebsderivatives(self,U_full):
+        return compute_bspline_derivatives_3d(U_full, 
+                                            self.Bit_t, 
+                                            self.Bit_x, 
+                                            self.Bit_y, 
+                                            self.Bit_z,
+                                            self.Bit_t_derivative,
+                                            self.Bit_x_derivative, 
+                                            self.Bit_y_derivative, 
+                                            self.Bit_z_derivative,
+                                            self.Bit_x_second_derivative, 
+                                            self.Bit_y_second_derivative, 
+                                            self.Bit_z_second_derivative)
+        
+    def loss(self,y_hat, y_ic, ic, lmd):
+           
+        U_full = torch.zeros((ic.shape[0],
                               self.n_ctrl_pts_time,
                               self.n_ctrl_pts_state, 
                               self.n_ctrl_pts_state, 
                               self.n_ctrl_pts_state))
-        U_full[:,0, :, :, :] = x  # Set initial condition at t=0
-        U_full[:,1:,:,:, :] = y_hat  # Predicted control points 
+        
+        U_full[:,0,:,:,:] = y_ic
+        U_full[:,1:,:,:, :] = y_hat # Predicted control points 
+        #U_full = y_hat
         
         # Compute B-spline derivatives (t, x, and x^2 derivatives)
-        B_surface, B_s_t, B_s_x, B_s_y, B_s_z, B_s_xx = compute_bspline_derivatives_3d(U_full, 
-                                                            self.Bit_t, 
-                                                            self.Bit_x, self.Bit_y, self.Bit_z,
-                                                            self.Bit_t_derivative,
-                                                            self.Bit_x_derivative, self.Bit_y_derivative, self.Bit_z_derivative,
-                                                            self.Bit_x_second_derivative, self.Bit_y_second_derivative, self.Bit_z_second_derivative)
-        res1 = self.pde_residual(B_s_t=B_s_t, 
+        B_surface, B_s_t, B_s_x, B_s_y, B_s_z, B_s_xx = self.computebsderivatives(U_full) 
+        res1= self.pde_residual(B_surface= B_surface,
+                                 B_s_t=B_s_t, 
                                 B_s_x=B_s_x,
                                 B_s_y=B_s_y,
                                 B_s_z=B_s_z, 
                                 B_s_xx= B_s_xx)
-        
         physics_loss = torch.mean(torch.sum(torch.pow(res1,2),axis = (2,3,4)))
-        #physics_loss+= torch.mean(torch.sum(torch.pow(res2,2),axis = (1)))
-        return  physics_loss
+        #initial condition loss
+        true_ic_surface = self.make_surface(ic)
+        pred_ic_surface = self.make_surface(y_ic)
+        loss_ic_cpt = torch.mean(torch.sum((y_ic - ic)**2/(y_ic**2+ic**2+.0001),axis=(1,2,3) ))
+        loss_ic =  torch.mean(torch.sum(torch.pow((B_surface[:,0,:,:,:] - true_ic_surface)/(true_ic_surface+.0000001),2), axis= (1,2,3)))
+        loss_ic_2 =  torch.mean(torch.sum(torch.pow((B_surface[:,0,:,:,:] - pred_ic_surface)/(true_ic_surface+.0000001),2), axis= (1,2,3)))
+        loss_ic_3 = torch.mean(torch.sum(torch.pow((pred_ic_surface- true_ic_surface)/(true_ic_surface+.0000001),2), axis= (1,2,3)))
+        print(loss_ic.detach().numpy(), loss_ic_2.detach().numpy(), loss_ic_3.detach().numpy())
+        print(torch.sum(pred_ic_surface, axis = (1,2,3)))
+        print(torch.sum(true_ic_surface, axis = (1,2,3)))
+         
+        #data loss at a random timestep
+        ts = np.random.randint(self.n_points)
+        time =self.t[ts]
+        true_surface = self.estimate_true_surface_at_timestep(lmd, time) 
+        data_loss = torch.mean(torch.sum(torch.pow(B_surface[:,ts,:,:,:] - true_surface,2), axis = (1,2,3))) 
+        
+        print(f" {physics_loss.detach().numpy():02.7f},"+  
+              f" {data_loss.detach().numpy():02.7f}"+
+              f" {loss_ic.detach().numpy():02.7f},"+
+              f" {loss_ic_cpt.detach().numpy():02.7f},"+  
+              f" {torch.sum(B_surface[:,0,:,:,:], axis = (0, 3,1,2)).detach().numpy()}")
+        
+        loss = loss_ic_cpt #+ data_loss
+        
+        if torch.isnan(loss):
+            print("LOSS IS NAN")
+            exit()
+        return loss #
             
         
     def train(self, config, **kwargs):
@@ -92,57 +154,46 @@ class bsnet_train(base_run):
         if not self.is_configured:
             logger.warning("Is not configured.")
             return False
-        
-        #how often to newline print_outs
-        newline_rate = 100
-        
-        #reshape input and make into torch tensor.
-        lmd = torch.tensor(self.lmbda_train, dtype=torch.float32)
-        
+    
         # Define the initial condition with the size of control points grid
-        rows = torch.unbind(lmd, dim=0)
-        initial_condition = list(map(lambda row: self.gaussian_pdf(row[:3], row[3:]), rows))
-        initial_condition = torch.stack(initial_condition, dim =0)
-
+        self.initial_conditions, _ = self.gaussian_pdf(self.lambda_train[:,:3], self.lambda_train[:,3:])
         
         logger.info(" Training loop commences")
         min_loss = 1e12
         isSaved = False
        
-        def closure():
-            self.optimizer.zero_grad()
-            
-            u_hat = self.model(lmd) 
-            tloss = self.loss(u_hat, initial_condition)
-            tloss.backward()  
-            return tloss
-                    
         for epoch in range(self.model_params.get('max_epochs')):
         
             if not self.optim_needs_closure:
                 self.optimizer.zero_grad()
-                
-            u_hat = self.model(lmd)
-            tloss = self.loss(u_hat, initial_condition)
-                
-            if self.optim_needs_closure:
-                self.optimizer.step(closure) 
-            else:
-                tloss.backward()
+                tloss = self.closure()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=500)
                 self.optimizer.step()
+            if self.optim_needs_closure:
+                self.optimizer.step(self.closure)
+                tloss = self.closure() 
                 
             if min_loss*0.9> (tloss.item()-1e-8):
-                if epoch> self.model_params.get("max_epochs")//10 or not isSaved:
+                if epoch> self.model_params.get("max_epochs")//100 or not isSaved:
                     self.save_checkpoint(tloss)
                     isSaved =True
                     min_loss = tloss.item()
                 
-            if (epoch-1)%newline_rate==0:
-                print()
+                
             print(f" {epoch+1:05d} total_loss = {tloss.item():2.5f},"+
-                  f" min_loss {min_loss:2.7f}", end="\r")
-        print()
+                  f" min_loss {min_loss:2.7f}")#, end="")
         
+        
+    def closure(self):
+        self.optimizer.zero_grad()
+        
+        y_hat, y_ic = self.model(self.lambda_train[:1]) 
+        tloss = self.loss_ic_only(y_hat,y_ic, self.initial_conditions, self.lambda_train)
+        tloss.backward() 
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=500)
+        return tloss  
+    
+    
     def visualize(self, config, vis_lmbda, **kwargs):
         logger.info("--- Visualize  ---")
        
