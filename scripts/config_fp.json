@@ -9,13 +9,13 @@
   },
   "model": {
     "pde": {
-      "class_path": "bsnet.base_run.PDE",
+      "class_path": "bsnet.pde.PDE",
       "init_args": {
         "D": 0.1
       }
     },
     "bspline": {
-      "class_path": "bsnet.base_run.Spline",
+      "class_path": "bsnet.spline.Spline",
       "init_args": {
         "min_T": 0,
         "max_T": 1.0,
