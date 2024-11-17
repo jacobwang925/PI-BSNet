@@ -9,7 +9,6 @@ class ControlPointNet(nn.Module):
         layers = [nn.Linear(1, hidden_dim), nn.ReLU(inplace=True)]
         out_shape = hidden_dim
 
-        
         for i in range(hidden_depth):
             layers.append(nn.Linear(out_shape, hidden_dim))
             layers.append(nn.ReLU(inplace=True))
