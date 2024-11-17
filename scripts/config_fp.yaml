@@ -13,10 +13,10 @@ model:
   bspline:
     class_path: "bsnet.spline.Spline"
     init_args:
-      min_T: 0
-      max_T: 1.0
-      min_X: 0
-      max_X: 1.0
+      min_t: 0.0
+      max_t: 1.0
+      min_x: 0.0
+      max_x: 1.0
       n_ctrl_pts_time: 15
       n_ctrl_pts_state: 15
       order: 3

@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
 
-#activation registry
-activations ={"relu": torch.relu, 
-              "sigmoid":torch.sigmoid, 
-              "tanh":torch.tanh }
+# activation registry
+activations = {"relu": torch.relu, "sigmoid": torch.sigmoid, "tanh": torch.tanh}
+
 
 def init_weights(m):
     if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
@@ -13,29 +12,34 @@ def init_weights(m):
 
 # Define the neural network architecture
 class ControlPointNetA(nn.Module):
-    def __init__(self, 
-                 input_size:int, 
-                 n_ctrl_pts_time:int, 
-                 n_ctrl_pts_state:int,
-                 dimension:int = 3,
-                 hidden_dim:int =128, 
-                 hidden_depth:int =5, 
-                 activation="relu"):
-        
+    """_summary_
+
+    Args:
+        nn (_type_): _description_
+    """
+    def __init__(
+        self,
+        input_size: int,
+        n_ctrl_pts_time: int,
+        n_ctrl_pts_state: int,
+        dimension: int = 3,
+        hidden_dim: int = 128,
+        hidden_depth: int = 5,
+        activation="relu",
+    ):
+
         super(ControlPointNetA, self).__init__()
-        self.name="RecurrentModel"
+        self.name = "RecurrentModel"
         self.hidden_dim = hidden_dim
-        self.hidden_depth=hidden_depth
+        self.hidden_depth = hidden_depth
         self.n_ctrl_pts_time = n_ctrl_pts_time
         self.n_ctrl_pts_state = n_ctrl_pts_state
         self.act = activations.get(activation)
-        if self.act == None: 
+        if self.act is None:
             raise NotImplementedError(f"activation {activation} does not exist")
-        self.output_size= (n_ctrl_pts_state**dimension) 
+        self.output_size = n_ctrl_pts_state**dimension
         self.output_shape = [n_ctrl_pts_state for i in range(dimension)]
-        
-        
-        
+
         self.fc1 = nn.Linear(input_size, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         # self.fc4 = nn.Linear(hidden_dim, hidden_dim)
@@ -44,10 +48,18 @@ class ControlPointNetA(nn.Module):
         self.decode = nn.Linear(hidden_dim, 2 * hidden_dim)
         self.encode = nn.Linear(2 * hidden_dim, hidden_dim)
         self.out = nn.Linear(hidden_dim, self.output_size)
-        
+
         self.apply(init_weights)
 
     def forward(self, par):
+        """_summary_
+
+        Args:
+            par (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         par = self.act(self.fc1(par))
         par = self.act(self.fc2(par))
         x = self.act(self.h2x(par))
@@ -63,34 +75,46 @@ class ControlPointNetA(nn.Module):
         output = torch.stack(output_list, dim=1)
         return (
             output.view(-1, self.n_ctrl_pts_time, *self.output_shape),
-            output_list[0].reshape(-1, *self.output_shape)
-            )
+            output_list[0].reshape(-1, *self.output_shape),
+        )
+
 
 class ControlPointNetB(nn.Module):
-    def __init__(self, 
-                 input_size:int, 
-                 n_ctrl_pts_time:int, 
-                 n_ctrl_pts_state:int,
-                 dimension:int,  
-                 hidden_dim:int =128, 
-                 hidden_depth:int =5, 
-                 activation="relu"):
-        
+    """_summary_
+
+    Args:
+        nn (_type_): _description_
+    """
+    def __init__(
+        self,
+        input_size: int,
+        n_ctrl_pts_time: int,
+        n_ctrl_pts_state: int,
+        dimension: int,
+        hidden_dim: int = 128,
+        hidden_depth: int = 5,
+        activation="relu",
+    ):
+
         super(ControlPointNetB, self).__init__()
-        self.name="SimpleModel"
+        self.name = "SimpleModel"
         self.hidden_dim = hidden_dim
-        self.hidden_depth=hidden_depth
+        self.hidden_depth = hidden_depth
         self.n_ctrl_pts_time = n_ctrl_pts_time
         self.n_ctrl_pts_state = n_ctrl_pts_state
         self.act = activations.get(activation)
-        if self.act == None: 
+        if self.act is None:
             raise NotImplementedError(f"activation {activation} does not exist")
-       
-        self.output_size= n_ctrl_pts_time* (n_ctrl_pts_state**dimension) 
-        self.output_shape = [n_ctrl_pts_time]+[n_ctrl_pts_state for i in range(dimension)]
-        
+
+        self.output_size = n_ctrl_pts_time * (n_ctrl_pts_state**dimension)
+        self.output_shape = [n_ctrl_pts_time] + [
+            n_ctrl_pts_state for i in range(dimension)
+        ]
+
         self.fc1 = nn.Linear(input_size, hidden_dim)
-        self.hidden_list = [nn.Linear(hidden_dim, hidden_dim) for i in range(hidden_dim)]
+        self.hidden_list = [
+            nn.Linear(hidden_dim, hidden_dim) for i in range(hidden_dim)
+        ]
         self.out = nn.Linear(hidden_dim, self.output_size)
         self.apply(init_weights)
 
@@ -98,5 +122,5 @@ class ControlPointNetB(nn.Module):
         x = self.act(self.fc1(par))
         for i in range(self.hidden_depth):
             x = self.act(self.hidden_list[i](x))
-        output = self.out(x).reshape(-1,*self.output_shape)
-        return (output, output[:,0,:])
+        output = self.out(x).reshape(-1, *self.output_shape)
+        return (output, output[:, 0, :])

@@ -1,36 +1,38 @@
 import logging
 from abc import abstractmethod
+from datetime import datetime
 from typing import Dict
+
 import lightning as L
 import torch
 import torch.optim as optim
-from datetime import datetime
-from bsnet.spline import Spline
+
 from bsnet.pde import PDE
+from bsnet.spline import Spline
+
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
 
 
 class BSNet(L.LightningModule):
     def __init__(
         self,
-        pde:PDE,
-        bspline:Spline,
-        model:torch.nn.Module, 
-        dimension:int =1,
+        pde: PDE,
+        bspline: Spline,
+        model: torch.nn.Module,
+        dimension: int = 1,
     ):
         super().__init__()
         self.bspline = bspline
         self.dimension = dimension
         # self.model_params = kwargs  # Store any additional parameters
- 
+
         self.pde = pde
         self.model = model
         self.model_name = model.name
         self.run_version = datetime.now().strftime("%Y%m%d-%H%M%S")
-        
-    def forward(self,x):
+
+    def forward(self, x):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
@@ -67,7 +69,7 @@ class BSNet(L.LightningModule):
             logger=True,
             sync_dist=True,
         )
-        
+
     def loss(self, y_hat, y_ic, ic):
         y_hat[:, :, :, :, [0, -1]] = 1
         y_ic[:, :, :, [0, -1]] = 1
@@ -75,7 +77,7 @@ class BSNet(L.LightningModule):
 
         loss_on_ic_ctrl = torch.mean(torch.sum((y_ic - ic) ** 2, axis=(1, 2, 3)))
 
-        #if loss_on_ic_ctrl > 100:
+        # if loss_on_ic_ctrl > 100:
         #    return loss_on_ic_ctrl
 
         ic_surface = self.bspline.make_surface(ic)
@@ -84,14 +86,15 @@ class BSNet(L.LightningModule):
             torch.sum((y_ic_surface - ic_surface) ** 2, axis=(1, 2, 3))
         )
 
-        #if ic_loss > 50:
+        # if ic_loss > 50:
         #    return loss_on_ic_ctrl + ic_loss
 
         U_full = y_hat
         B_surface, B_s_t, B_s_xx = self.bspline.computebsderivatives(U_full)
         pde_loss = torch.mean(
             torch.sum(
-                (self.pde.pde_residual(u=0, dudt=B_s_t, dudx=0, dudxdx=B_s_xx)) ** 2, axis=(1, 2, 3)
+                (self.pde.pde_residual(u=0, dudt=B_s_t, dudx=0, dudxdx=B_s_xx)) ** 2,
+                axis=(1, 2, 3),
             )
         )
 
@@ -103,20 +106,3 @@ class BSNet(L.LightningModule):
         )
 
         return loss_on_ic_ctrl + ic_loss + neumann_loss_xy + 10 * pde_loss
-    def configure_optimizers(self):
-        """setup optimizer"""
-        optimizer_name = self.model_params.get("optimizer", "adam").lower()
-        if optimizer_name == "adam":
-            self.optimizer = optim.Adam(
-                self.model.parameters(), lr=self.model_params.get("learning_rate")
-            )
-            self.optim_needs_closure = False
-        elif optimizer_name == "lbfgs":
-            self.optimizer = optim.LBFGS(self.model.parameters(), history_size=100)
-            self.optim_needs_closure = True
-        else:
-            logger.info("Default optimizer is adam")
-            self.optimizer = optim.Adam(
-                self.model.parameters(), lr=self.model_params.get("learning_rate")
-            )
-            self.optim_needs_closure = False

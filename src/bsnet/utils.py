@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name
 import numpy as np
 import torch
 from scipy.integrate import quad
@@ -46,18 +47,18 @@ def BsKnots(n_cp, d, Ns):
 # B-spline derivative basis function (first derivative)
 def BsKnots_derivatives(n_cp, d, Ns, Ln, tk):
     # First derivative
-    Bit_derivative = torch.zeros((Ns, n_cp))
+    bit_derivative = torch.zeros((Ns, n_cp))
     for j in range(n_cp):
         for i in range(Ns):
-            Bit_derivative[i, j] = BsFun_derivative(j + 1, d, tk[i], Ln)
+            bit_derivative[i, j] = BsFun_derivative(j + 1, d, tk[i], Ln)
 
     # Second derivative
-    Bit_second_derivative = torch.zeros((Ns, n_cp))
+    bit_second_derivative = torch.zeros((Ns, n_cp))
     for j in range(n_cp):
         for i in range(Ns):
-            Bit_second_derivative[i, j] = BsFun_second_derivative(j + 1, d, tk[i], Ln)
+            bit_second_derivative[i, j] = BsFun_second_derivative(j + 1, d, tk[i], Ln)
 
-    return Bit_derivative, Bit_second_derivative
+    return bit_derivative, bit_second_derivative
 
 
 def BsFun_derivative(i, d, t, Ln):
@@ -158,38 +159,38 @@ def create_array(N, M, t, max_t):
 # Compute derivatives of B-spline surfaces
 def compute_bspline_derivatives(
     U_full,
-    Bit_t,
-    Bit_x,
-    Bit_t_derivative,
-    Bit_x_derivative,
-    Bit_t_second_derivative,
-    Bit_x_second_derivative,
+    bit_t,
+    bit_x,
+    bit_t_derivative,
+    bit_x_derivative,
+    bit_t_second_derivative,
+    bit_x_second_derivative,
 ):
-    # First derivative with respect to time t (using first derivative of Bit_t)
-    B_surface_t = torch.matmul(torch.matmul(Bit_t_derivative, U_full), Bit_x.T)
+    # First derivative with respect to time t (using first derivative of bit_t)
+    B_surface_t = torch.matmul(torch.matmul(bit_t_derivative, U_full), bit_x.T)
 
-    # First derivative with respect to space x (using first derivative of Bit_x)
-    B_surface_x = torch.matmul(torch.matmul(Bit_t, U_full), Bit_x_derivative.T)
+    # First derivative with respect to space x (using first derivative of bit_x)
+    B_surface_x = torch.matmul(torch.matmul(bit_t, U_full), bit_x_derivative.T)
 
-    # Second derivative with respect to space x (using second derivative of Bit_x)
-    B_surface_xx = torch.matmul(torch.matmul(Bit_t, U_full), Bit_x_second_derivative.T)
+    # Second derivative with respect to space x (using second derivative of bit_x)
+    B_surface_xx = torch.matmul(torch.matmul(bit_t, U_full), bit_x_second_derivative.T)
 
     return B_surface_t, B_surface_x, B_surface_xx
 
 
 def compute_bspline_derivatives_3d(
     U_full,
-    Bit_t,
-    Bit_x,
-    Bit_y,
-    Bit_z,
-    Bit_t_derivative,
-    Bit_x_derivative,
-    Bit_y_derivative,
-    Bit_z_derivative,
-    Bit_x_pp,
-    Bit_y_pp,
-    Bit_z_pp,
+    bit_t,
+    bit_x,
+    bit_y,
+    bit_z,
+    bit_t_derivative,
+    bit_x_derivative,
+    bit_y_derivative,
+    bit_z_derivative,
+    bit_x_pp,
+    bit_y_pp,
+    bit_z_pp,
 ):
 
     # Jasmine's faster version of the code below.
@@ -198,28 +199,28 @@ def compute_bspline_derivatives_3d(
 
     # Compute the surface and its derivatives
     B_surface = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t, Bit_x, Bit_y, Bit_z
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t, bit_x, bit_y, bit_z
     )
     B_surface_t = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t_derivative, Bit_x, Bit_y, Bit_z
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t_derivative, bit_x, bit_y, bit_z
     )
     B_surface_x = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t, Bit_x_derivative, Bit_y, Bit_z
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t, bit_x_derivative, bit_y, bit_z
     )
     B_surface_y = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t, Bit_x, Bit_y_derivative, Bit_z
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t, bit_x, bit_y_derivative, bit_z
     )
     B_surface_z = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t, Bit_x, Bit_y, Bit_z_derivative
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t, bit_x, bit_y, bit_z_derivative
     )
     B_surface_xx = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t, Bit_x_pp, Bit_y, Bit_z
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t, bit_x_pp, bit_y, bit_z
     )
     B_surface_yy = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t, Bit_x, Bit_y_pp, Bit_z
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t, bit_x, bit_y_pp, bit_z
     )
     B_surface_zz = torch.einsum(
-        "qijkl,ti,xj,yk,zl->qtxyz", U_full, Bit_t, Bit_x, Bit_y, Bit_z_pp
+        "qijkl,ti,xj,yk,zl->qtxyz", U_full, bit_t, bit_x, bit_y, bit_z_pp
     )
 
     # Laplacian (sum of second derivatives in each spatial direction)
@@ -238,12 +239,12 @@ def compute_bspline_derivatives_3d(
 # Compute B-spline derivatives of the surface and apply weighting to the physics loss
 def compute_weighted_physics_loss(
     U_full,
-    Bit_t,
-    Bit_x,
-    Bit_t_derivative,
-    Bit_x_derivative,
-    Bit_t_second_derivative,
-    Bit_x_second_derivative,
+    bit_t,
+    bit_x,
+    bit_t_derivative,
+    bit_x_derivative,
+    bit_t_second_derivative,
+    bit_x_second_derivative,
     lambda_train,
     x,
     t,
@@ -251,12 +252,12 @@ def compute_weighted_physics_loss(
     # Compute B-spline derivatives (t, x, and x^2 derivatives)
     B_surface_t, B_surface_x, B_surface_xx = compute_bspline_derivatives(
         U_full,
-        Bit_t,
-        Bit_x,
-        Bit_t_derivative,
-        Bit_x_derivative,
-        Bit_t_second_derivative,
-        Bit_x_second_derivative,
+        bit_t,
+        bit_x,
+        bit_t_derivative,
+        bit_x_derivative,
+        bit_t_second_derivative,
+        bit_x_second_derivative,
     )
 
     # Compute the physics residuals based on the PDE: B_t = lambda * B_x + 0.5 * B_xx
