@@ -32,3 +32,45 @@ Simulation code for BS net and other baselines on the recovery probability probl
 [ICLR25_DeepONet_Varying_a.ipynb](https://colab.research.google.com/drive/1q68svEhPPuMC1PnQeapEckj7xuDzsaIk)
 
 
+### REVISED
+
+#### Training 
+creates checkpoints
+```bash
+python scripts/cli.py  fit -c scripts/config_fp.yaml
+```
+
+now with a config file like this:
+```
+trainer:
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: "experiments/{name}/{run_name}/logs"
+```
+
+this will make a checkpoint model here (for example - where RecurrentModel is the name of the model):
+```
+experiment/RecurrentModel/20241117-225850/checkpoints
+```
+
+
+#### Testing 
+creates output pytorch files
+
+```bash
+python scripts/cli.py  test -c scripts/config_fp.yaml
+```
+this will create a files in (for example):
+
+```
+experiment/RecurrentModel/20241117-225850/test_results
+```
+
+
+#### Creating plots 
+
+makes pdf files (assuming you have two files training and testing)
+```bash
+python temp.py training.pt testing.pt
+```
