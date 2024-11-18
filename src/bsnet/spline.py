@@ -6,7 +6,7 @@ import torch
 
 from bsnet.utils import BsKnots, BsKnots_derivatives
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -25,8 +25,6 @@ class Spline:
         min_x,
         max_x,
     ):
-
-        print(n_ctrl_pts_state, max_t, max_x, min_t, min_x)
         self.n_ctrl_pts_time = n_ctrl_pts_time
         self.n_ctrl_pts_state = n_ctrl_pts_state
         self.dimension = dimension
@@ -40,25 +38,36 @@ class Spline:
         """initialize bspline matrices"""
         self.t = torch.linspace(self.min_t, self.max_t, self.n_points)
         self.x = torch.linspace(self.min_x, self.max_x, self.n_points)
-        self.tk_t, self.Ln_t, self.bit_t = BsKnots(
+        self.tk_t, self.ln_t, self.bit_t = BsKnots(
             self.n_ctrl_pts_time, self.order, self.n_points
         )
         self.bit_t_d, self.bit_t_dd = BsKnots_derivatives(
-            self.n_ctrl_pts_time, self.order, len(self.t), self.Ln_t, self.tk_t
+            self.n_ctrl_pts_time, self.order, len(self.t), self.ln_t, self.tk_t
         )
 
-        tk_x, Ln_x, bit_x = BsKnots(self.n_ctrl_pts_state, self.order, self.n_points)
+        tk_x, ln_x, bit_x = BsKnots(self.n_ctrl_pts_state, self.order, self.n_points)
         bit_x_d, bit_x_dd = BsKnots_derivatives(
-            self.n_ctrl_pts_state, self.order, len(self.x), Ln_x, tk_x
+            self.n_ctrl_pts_state, self.order, len(self.x), ln_x, tk_x
         )
+        self.tk_x = tk_x
+        self.ln_x = ln_x
+        self.bit_x = bit_x
+        self.bit_x_d = bit_x_d
+        self.bit_x_dd = bit_x_dd
 
-        for i in "xyz"[: self.dimension]:
-            setattr(self, i, self.x)
-            setattr(self, f"tk_{i}", tk_x)
-            setattr(self, f"Ln_{i}", Ln_x)
-            setattr(self, f"bit_{i}", bit_x)
-            setattr(self, f"bit_{i}_d", bit_x_d)
-            setattr(self, f"bit_{i}_dd", bit_x_dd)
+        if self.dimension > 1:
+            self.tk_y = tk_x
+            self.ln_y = ln_x
+            self.bit_y = bit_x
+            self.bit_y_d = bit_x_d
+            self.bit_y_dd = bit_x_dd
+
+            if self.dimension > 2:
+                self.tk_z = tk_x
+                self.ln_z = ln_x
+                self.bit_z = bit_x
+                self.bit_z_d = bit_x_d
+                self.bit_z_dd = bit_x_dd
 
     def make_surface(self, inner_matrix):
         # Generate the B-spline surface with the predicted control points
@@ -77,54 +86,54 @@ class Spline:
             )
         return y
 
-    def computebsderivatives(self, U_full):
+    def computebsderivatives(self, u_full):
         path_info = oe.contract_path(
             "qijkl,ti,xj,yk,zl->qtxyz",
-            U_full,
+            u_full,
             self.bit_t,
             self.bit_x,
             self.bit_y,
             self.bit_z,
         )[0]
-        B_surface = oe.contract(
+        b_surface = oe.contract(
             "qijkl,ti,xj,yk,zl->qtxyz",
-            U_full,
+            u_full,
             self.bit_t,
             self.bit_x,
             self.bit_y,
             self.bit_z,
             optimize=path_info,
         )
-        B_surface_t = oe.contract(
+        b_surface_t = oe.contract(
             "qijkl,ti,xj,yk,zl->qtxyz",
-            U_full,
+            u_full,
             self.bit_t_d,
             self.bit_x,
             self.bit_y,
             self.bit_z,
             optimize=path_info,
         )
-        B_surface_xx = oe.contract(
+        b_surface_xx = oe.contract(
             "qijkl,ti,xj,yk,zl->qtxyz",
-            U_full,
+            u_full,
             self.bit_t,
             self.bit_x_dd,
             self.bit_y,
             self.bit_z,
             optimize=path_info,
         )
-        B_surface_yy = oe.contract(
+        b_surface_yy = oe.contract(
             "qijkl,ti,xj,yk,zl->qtxyz",
-            U_full,
+            u_full,
             self.bit_t,
             self.bit_x,
             self.bit_y_dd,
             self.bit_z,
             optimize=path_info,
         )
-        B_surface_zz = oe.contract(
+        b_surface_zz = oe.contract(
             "qijkl,ti,xj,yk,zl->qtxyz",
-            U_full,
+            u_full,
             self.bit_t,
             self.bit_x,
             self.bit_y,
@@ -132,5 +141,8 @@ class Spline:
             optimize=path_info,
         )
         # Laplacian (sum of second derivatives in each spatial direction)
-        B_surface_laplacian = B_surface_xx + B_surface_yy + B_surface_zz
-        return B_surface, B_surface_t, B_surface_laplacian
+        b_surface_laplacian = b_surface_xx + b_surface_yy + b_surface_zz
+        return b_surface, b_surface_t, b_surface_laplacian
+
+    def get_init_params(self):
+        return vars(self)

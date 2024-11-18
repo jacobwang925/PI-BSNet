@@ -13,3 +13,6 @@ class PDE:
     def pde_residual(self, u, dudt, dudx, dudxdx):
         res1 = dudt - self.D * dudxdx
         return res1
+
+    def get_init_params(self):
+        return vars(self)

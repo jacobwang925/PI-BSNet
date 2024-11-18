@@ -1,11 +1,23 @@
 # pylint: disable=invalid-name
+from typing import List
 import numpy as np
 import torch
 from scipy.integrate import quad
 
 
 # B-spline basis function
-def BsFun(i, d, t, Ln):
+def BsFun(i: int, d: int, t: float, Ln: List[float]) -> float:
+    """recursive function
+
+    Args:
+        i (int): _description_
+        d (int): _description_
+        t (float): _description_
+        Ln (List[float]): _description_
+
+    Returns:
+        _type_: _description_
+    """
     if d == 0:
         return 1.0 if Ln[i - 1] <= t < Ln[i] else 0.0
     else:
@@ -19,7 +31,17 @@ def BsFun(i, d, t, Ln):
 
 
 # B-spline knots and basis matrix
-def BsKnots(n_cp, d, Ns):
+def BsKnots(n_cp: int, d: int, Ns: int):
+    """B-spline knots and basis matrix
+
+    Args:
+        n_cp (int): number of control points
+        d (int): _description_
+        Ns (int): number of points
+
+    Returns:
+        _type_: _description_
+    """
     n_knots = n_cp + d + 1
     Ln = torch.zeros(n_knots)
 
@@ -61,36 +83,46 @@ def BsKnots_derivatives(n_cp, d, Ns, Ln, tk):
     return bit_derivative, bit_second_derivative
 
 
-def BsFun_derivative(i, d, t, Ln):
+def BsFun_derivative(i: int, d: int, t, Ln: List[float]):
+    """get bspline function derivatives
+
+    Args:
+        i (int): _description_
+        d (int): _description_
+        t (_type_): _description_
+        Ln (List[float]): _description_
+
+    Returns:
+        _type_: _description_
+    """
     if d == 0:
         return 0.0
-    else:
-        a = 0 if (Ln[d + i - 1] - Ln[i - 1]) == 0 else d / (Ln[d + i - 1] - Ln[i - 1])
-        b = 0 if (Ln[d + i] - Ln[i]) == 0 else d / (Ln[d + i] - Ln[i])
-        return a * BsFun(i, d - 1, t, Ln) - b * BsFun(i + 1, d - 1, t, Ln)
+
+    a = 0 if (Ln[d + i - 1] - Ln[i - 1]) == 0 else d / (Ln[d + i - 1] - Ln[i - 1])
+    b = 0 if (Ln[d + i] - Ln[i]) == 0 else d / (Ln[d + i] - Ln[i])
+    return a * BsFun(i, d - 1, t, Ln) - b * BsFun(i + 1, d - 1, t, Ln)
 
 
 # Second derivative of B-spline
 def BsFun_second_derivative(i, d, t, Ln):
     if d < 2:
         return 0.0
-    else:
-        a = (
-            0
-            if (Ln[d + i - 2] - Ln[i - 2]) == 0
-            else d * (d - 1) / ((Ln[d + i - 2] - Ln[i - 2]) ** 2)
-        )
-        b = (
-            0
-            if (Ln[d + i - 1] - Ln[i - 1]) == 0
-            else 2 * d * (d - 1) / ((Ln[d + i - 1] - Ln[i - 1]) ** 2)
-        )
-        c = 0 if (Ln[d + i] - Ln[i]) == 0 else d * (d - 1) / ((Ln[d + i] - Ln[i]) ** 2)
-        return (
-            a * BsFun(i, d - 2, t, Ln)
-            - b * BsFun(i + 1, d - 2, t, Ln)
-            + c * BsFun(i + 2, d - 2, t, Ln)
-        )
+    a = (
+        0
+        if (Ln[d + i - 2] - Ln[i - 2]) == 0
+        else d * (d - 1) / ((Ln[d + i - 2] - Ln[i - 2]) ** 2)
+    )
+    b = (
+        0
+        if (Ln[d + i - 1] - Ln[i - 1]) == 0
+        else 2 * d * (d - 1) / ((Ln[d + i - 1] - Ln[i - 1]) ** 2)
+    )
+    c = 0 if (Ln[d + i] - Ln[i]) == 0 else d * (d - 1) / ((Ln[d + i] - Ln[i]) ** 2)
+    return (
+        a * BsFun(i, d - 2, t, Ln)
+        - b * BsFun(i + 1, d - 2, t, Ln)
+        + c * BsFun(i + 2, d - 2, t, Ln)
+    )
 
 
 def ground_truth(x_vals, T_vals, a, lambda_param):

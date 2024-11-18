@@ -5,9 +5,16 @@ from torch.utils.data import DataLoader, Dataset
 
 
 class BSDataset(Dataset):
-    """ dataset basic
-    """
+    """takes in parameters and returns the intial condition and surface"""
+
     def __init__(self, data_path: str, n_ctrl_pts_state: int, dimension: int = 3):
+        """initialize the data
+
+        Args:
+            data_path (str): path to numpy array of input variables
+            n_ctrl_pts_state (int): number of control points
+            dimension (int, optional): number of spatial dimensions. Defaults to 3.
+        """
 
         assert dimension == 3, "Dimension must be 3. can expand later"
 
@@ -18,29 +25,34 @@ class BSDataset(Dataset):
         space_griding = [linspace for i in range(dimension)]
         grid = torch.meshgrid(*space_griding, indexing="ij")
 
-        C = self.parameters
+        params = self.parameters
         for i in range(dimension):
-            C = C.unsqueeze(-1)
+            params = params.unsqueeze(-1)
 
         # we use these parameters to create the state at t=0
         self.at_time_0 = (
-            (C[:, 1] * grid[0])
-            + (C[:, 2] * grid[1])
-            + (C[:, 3] * grid[2])
+            (params[:, 1] * grid[0])
+            + (params[:, 2] * grid[1])
+            + (params[:, 3] * grid[2])
             + 0.5
-            + C[:, 0]
+            + params[:, 0]
         )
 
+        # hardcoded bc
+        self.at_time_0[:, :, :, [0, -1]] = 1
+
     def __len__(self):
+        """length"""
         return self.parameters.shape[0]
 
     def __getitem__(self, idx):
+        """get item (idx)"""
         return {"X": self.parameters[idx], "y": self.at_time_0[idx]}
 
 
 class BSDataModule(L.LightningDataModule):
-    """ data module basic
-    """
+    """data module basic"""
+
     def __init__(
         self,
         train_data_path,
@@ -58,7 +70,7 @@ class BSDataModule(L.LightningDataModule):
         self.n_ctrl_pts_state = n_ctrl_pts_state
         self.batch_size = batch_size
         self.dimension = dimension
-        self.input_size = input_size 
+        self.input_size = input_size
         self.train_dataset = BSDataset(
             self.train_data_path, self.n_ctrl_pts_state, self.dimension
         )

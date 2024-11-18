@@ -17,6 +17,7 @@ class ControlPointNetA(nn.Module):
     Args:
         nn (_type_): _description_
     """
+
     def __init__(
         self,
         input_size: int,
@@ -27,8 +28,19 @@ class ControlPointNetA(nn.Module):
         hidden_depth: int = 5,
         activation="relu",
     ):
+        """Init
 
-        super(ControlPointNetA, self).__init__()
+        Args:
+            input_size (int): number of parameters
+            n_ctrl_pts_time (int): number of time control points
+            n_ctrl_pts_state (int): number of state/space control points
+            dimension (int): number of state dimensions
+            hidden_dim (int, optional): _description_. Defaults to 128.
+            hidden_depth (int, optional): _description_. Defaults to 5.
+            activation (str, optional): _description_. Defaults to "relu".
+
+        """
+        super().__init__()
         self.name = "RecurrentModel"
         self.hidden_dim = hidden_dim
         self.hidden_depth = hidden_depth
@@ -85,6 +97,7 @@ class ControlPointNetB(nn.Module):
     Args:
         nn (_type_): _description_
     """
+
     def __init__(
         self,
         input_size: int,
@@ -95,8 +108,20 @@ class ControlPointNetB(nn.Module):
         hidden_depth: int = 5,
         activation="relu",
     ):
+        """Init
 
-        super(ControlPointNetB, self).__init__()
+        Args:
+            input_size (int): number of parameters
+            n_ctrl_pts_time (int): number of time control points
+            n_ctrl_pts_state (int): number of state/space control points
+            dimension (int): number of state dimensions
+            hidden_dim (int, optional): _description_. Defaults to 128.
+            hidden_depth (int, optional): _description_. Defaults to 5.
+            activation (str, optional): _description_. Defaults to "relu".
+
+        """
+
+        super().__init__()
         self.name = "SimpleModel"
         self.hidden_dim = hidden_dim
         self.hidden_depth = hidden_depth
