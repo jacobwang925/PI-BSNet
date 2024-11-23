@@ -31,6 +31,10 @@ Simulation code for BS net and other baselines on the recovery probability probl
 
 [ICLR25_DeepONet_Varying_a.ipynb](https://colab.research.google.com/drive/1q68svEhPPuMC1PnQeapEckj7xuDzsaIk)
 
+The data generation for Burgers' equations is at: [Burgers_Data_Generation.ipynb](https://colab.research.google.com/drive/15rg3-UzisiK1HLo8t43F4lnveLME-Zon)
+
+BS Net for Burgers' equations is at: [Burgers_BS_Net.ipynb](https://colab.research.google.com/drive/1kVaBsBpciPP2T2FofcddTQoX68p7gZrk)
+
 
 ### REVISED
 
