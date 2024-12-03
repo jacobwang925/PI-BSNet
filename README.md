@@ -40,6 +40,12 @@ PINN results for he 3D heat equation is at: [Heat_3D_PINN_ICLR_setting.ipynb](ht
 
 ### REVISED
 
+To run the code for BS net
+
+```bash
+pip install -e .
+```
+
 #### Training 
 creates checkpoints
 ```bash
@@ -78,5 +84,5 @@ experiment/RecurrentModel/20241117-225850/test_results
 
 makes pdf files (assuming you have two files training and testing)
 ```bash
-python temp.py training.pt testing.pt
+python plot.py training.pt testing.pt
 ```
