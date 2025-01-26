@@ -38,6 +38,9 @@ BS Net for Burgers' equations is at: [Burgers_BS_Net.ipynb](https://colab.resear
 PINN results for he 3D heat equation is at: [Heat_3D_PINN_ICLR_setting.ipynb](https://colab.research.google.com/drive/17SzFg9x7dhsP7NOPdW1h8KjPuMugwXpl)
 
 
+Comparison plots in the paper can be generated via: [PINN_varying_comparison_with_BS.ipynb](https://colab.research.google.com/drive/1a1Y4d4qCYto5UVzwv_waG3wSYMpOwCKA)
+
+
 ### REVISED
 
 To run the code for BS net
