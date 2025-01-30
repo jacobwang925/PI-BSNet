@@ -35,6 +35,8 @@ The data generation for Burgers' equations is at: [Burgers_Data_Generation.ipynb
 
 BS Net for Burgers' equations is at: [Burgers_BS_Net.ipynb](https://colab.research.google.com/drive/1kVaBsBpciPP2T2FofcddTQoX68p7gZrk)
 
+BS Net for Advection equation is at [Advection_Beta_Phase.ipynb](https://colab.research.google.com/drive/10mRqRjwkjXfHYuW7g2AdMsXhU4naAHbB#scrollTo=j7ZIinAb44Qa)
+
 PINN results for he 3D heat equation is at: [Heat_3D_PINN_ICLR_setting.ipynb](https://colab.research.google.com/drive/17SzFg9x7dhsP7NOPdW1h8KjPuMugwXpl)
 
 
