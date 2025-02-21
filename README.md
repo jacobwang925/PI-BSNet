@@ -43,6 +43,10 @@ PINN results for he 3D heat equation is at: [Heat_3D_PINN_ICLR_setting.ipynb](ht
 Comparison plots in the paper can be generated via: [PINN_varying_comparison_with_BS.ipynb](https://colab.research.google.com/drive/1a1Y4d4qCYto5UVzwv_waG3wSYMpOwCKA)
 
 
+BS Net for diffusion equations on the trapezoid domain can be found at: Square training data [BS_Net_Trapezoid.ipynb](https://colab.research.google.com/drive/1g9FITHacs19kVaoY2qzsqoGx2G1bE8yi), Mapped trapezoid training data [BS_Net_Trapezoid_Mapped_Training_Data.ipynb](https://colab.research.google.com/drive/1Qku5ZQqQq5Ra1-RFmRrBfuEkW3iaRoXn#scrollTo=V02xYzE6p542)
+
+
+
 ### REVISED
 
 To run the code for BS net
