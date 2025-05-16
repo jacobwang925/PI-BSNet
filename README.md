@@ -46,7 +46,7 @@ Comparison plots in the paper can be generated via: [PINN_varying_comparison_wit
 BS Net for diffusion equations on the trapezoid domain can be found at: Square training data [BS_Net_Trapezoid.ipynb](https://colab.research.google.com/drive/1g9FITHacs19kVaoY2qzsqoGx2G1bE8yi), Mapped trapezoid training data [BS_Net_Trapezoid_Mapped_Training_Data.ipynb](https://colab.research.google.com/drive/1Qku5ZQqQq5Ra1-RFmRrBfuEkW3iaRoXn#scrollTo=V02xYzE6p542)
 
 
-Ablation experiment code is under folder 'Neurips_25', with conda environment file 'pi-dbsn-env'.
+Ablation experiment code is under folder 'Neurips_25', with conda environment file 'pi-dbsn-env.yml'.
 
 
 ### REVISED
