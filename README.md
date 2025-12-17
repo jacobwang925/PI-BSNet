@@ -48,6 +48,8 @@ BS Net for diffusion equations on the trapezoid domain can be found at: Square t
 
 Ablation experiment code is under folder 'Neurips_25', with conda environment file 'pi-dbsn-env.yml'.
 
+Loss curves, trade-off plots are generated via [ICLR25_Ablation_Visualization.ipynb](https://colab.research.google.com/drive/1GcWFMPrMgP5fcEEP3O9BNY8qFtV67Asa#scrollTo=_mETEPHNbV8q)
+
 
 ### REVISED
 
