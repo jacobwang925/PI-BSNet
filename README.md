@@ -52,6 +52,8 @@ Loss curves, trade-off plots are generated via [ICLR25_Ablation_Visualization.ip
 
 Gradient and Hessian comparison is at [BS_Net_Grad/Hessian.ipynb](https://colab.research.google.com/drive/1iRflZMytZ4Kq5QQ5KyKeUUXznClJaExN#scrollTo=pkaQqt1Wj94J)
 
+Generalization error experiment on advection equations is at [Advection_Generalization_Error.ipynb](https://colab.research.google.com/drive/1sak9dwM5PnCs7cHr623uqULVT3oFDTvL#scrollTo=KPPiBHIMyPZF)
+
 
 ### REVISED
 
