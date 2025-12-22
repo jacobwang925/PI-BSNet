@@ -50,6 +50,8 @@ Ablation experiment code is under folder 'Neurips_25', with conda environment fi
 
 Loss curves, trade-off plots are generated via [ICLR25_Ablation_Visualization.ipynb](https://colab.research.google.com/drive/1GcWFMPrMgP5fcEEP3O9BNY8qFtV67Asa#scrollTo=_mETEPHNbV8q)
 
+Gradient and Hessian comparison is at [BS_Net_Grad/Hessian.ipynb](https://colab.research.google.com/drive/1iRflZMytZ4Kq5QQ5KyKeUUXznClJaExN#scrollTo=pkaQqt1Wj94J)
+
 
 ### REVISED
 
