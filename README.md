@@ -50,9 +50,18 @@ Ablation experiment code is under folder 'Neurips_25', with conda environment fi
 
 Loss curves, trade-off plots are generated via [ICLR25_Ablation_Visualization.ipynb](https://colab.research.google.com/drive/1GcWFMPrMgP5fcEEP3O9BNY8qFtV67Asa#scrollTo=_mETEPHNbV8q)
 
+
+TMLR Code:
+
+Trapezoid experiments: [BS_Net_Trapezoid_TMLR.ipynb](https://colab.research.google.com/drive/1Zqp5erxb0LppSnhf4vEoSb9r4sC9_-4b#scrollTo=k8AY_JtnQgwq)
+
 Gradient and Hessian comparison is at [BS_Net_Grad/Hessian.ipynb](https://colab.research.google.com/drive/1iRflZMytZ4Kq5QQ5KyKeUUXznClJaExN#scrollTo=pkaQqt1Wj94J)
 
+Advection experiments: [BS_Net_Advection_TMLR.ipynb](https://colab.research.google.com/drive/1KPgG2FhWglGdXy1EMbEepCy9ZmB9exbd#scrollTo=gljAuEJcW9kp)
+
 Generalization error experiment on advection equations is at [Advection_Generalization_Error.ipynb](https://colab.research.google.com/drive/1sak9dwM5PnCs7cHr623uqULVT3oFDTvL#scrollTo=KPPiBHIMyPZF)
+
+Neumann BC experiments: Neurips_25/neumann_bc.py
 
 
 ### REVISED
