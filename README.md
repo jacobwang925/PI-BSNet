@@ -63,6 +63,7 @@ Generalization error experiment on advection equations is at [Advection_Generali
 
 Neumann BC experiments: Neurips_25/neumann_bc.py
 
+Forward-pass time: [BSNet_Forward_Pass_Time_TMLR.ipynb](https://colab.research.google.com/drive/1UVZHNXne6_inCPNA4IP5ccqSNZFoMA62#scrollTo=ITqZq8OqdD-P)
 
 ### REVISED
 
