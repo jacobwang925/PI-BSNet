@@ -1,0 +1,19 @@
+{
+  "model_name": "BSNet-loss",
+  "seed": 42,
+  "trained_this_run": true,
+  "train_time_sec": 266.71412992477417,
+  "epochs": 5000,
+  "lr": 0.001,
+  "loss_weights": {
+    "PDE": 1.0,
+    "DATA": 1.0,
+    "IC": 2.0,
+    "BC": 2.0
+  },
+  "bspline": {
+    "n_cp_x": 25,
+    "n_cp_t": 25,
+    "degree": 4
+  }
+}

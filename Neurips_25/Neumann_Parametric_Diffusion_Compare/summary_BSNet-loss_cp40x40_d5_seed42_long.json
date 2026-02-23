@@ -1,0 +1,43 @@
+{
+  "seed": 42,
+  "dataset_path": "Neumann_Parametric_Diffusion_Compare/dataset_seed42.pkl",
+  "device": "cuda",
+  "epochs": 10000,
+  "lr": 0.001,
+  "loss_weights": {
+    "PDE": 1.0,
+    "DATA": 5.0,
+    "IC": 2.0,
+    "BC": 2.0
+  },
+  "bspline_cfg": {
+    "n_cp_x": 40,
+    "n_cp_t": 40,
+    "degree": 5
+  },
+  "train_time_sec": {
+    "PINN": 1774.278491973877,
+    "PI-DeepONet": 2131.959878921509,
+    "BSNet-loss": 296.7298810482025
+  },
+  "avg_test_relL2": {
+    "PINN": 0.00865465234965086,
+    "PI-DeepONet": 0.06989572681486607,
+    "BSNet-loss": 0.017974296142347156
+  },
+  "single_case_relL2": {
+    "PINN": 0.01050010696053505,
+    "PI-DeepONet": 0.11955270171165466,
+    "BSNet-loss": 0.03305993601679802
+  },
+  "ckpt_files": {
+    "PINN": "Neumann_Parametric_Diffusion_Compare/PINN_seed42_long_ckpt.pth",
+    "PI-DeepONet": "Neumann_Parametric_Diffusion_Compare/PI-DeepONet_seed42_long_ckpt.pth",
+    "BSNet-loss": "Neumann_Parametric_Diffusion_Compare/BSNet-loss_cp40x40_d5_seed42_long_ckpt.pth"
+  },
+  "trained_this_run": {
+    "PINN": false,
+    "PI-DeepONet": false,
+    "BSNet-loss": true
+  }
+}

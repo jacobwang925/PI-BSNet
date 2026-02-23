@@ -1,0 +1,21 @@
+{
+  "model_name": "BSNet-loss",
+  "seed": 42,
+  "trained_this_run": true,
+  "train_time_sec": 148.57973432540894,
+  "epochs": 5000,
+  "lr": 0.001,
+  "loss_weights": {
+    "PDE": 1.0,
+    "DATA": 5.0,
+    "IC": 2.0,
+    "BC": 2.0
+  },
+  "ckpt_file": "Neumann_Parametric_Diffusion_Compare/BSNet-loss_cp40x40_d5_seed42_ckpt.pth",
+  "optim_file": "Neumann_Parametric_Diffusion_Compare/BSNet-loss_cp40x40_d5_seed42_optim.pth",
+  "bspline": {
+    "n_cp_x": 40,
+    "n_cp_t": 40,
+    "degree": 5
+  }
+}

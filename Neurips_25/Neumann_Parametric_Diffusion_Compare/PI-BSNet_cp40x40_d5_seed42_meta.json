@@ -1,0 +1,21 @@
+{
+  "model_name": "PI-BSNet",
+  "seed": 42,
+  "trained_this_run": true,
+  "train_time_sec": 299.15041303634644,
+  "epochs": 10000,
+  "lr": 0.001,
+  "loss_weights": {
+    "PDE": 1.0,
+    "DATA": 5.0,
+    "IC": 2.0,
+    "BC": 2.0
+  },
+  "ckpt_file": "Neumann_Parametric_Diffusion_Compare/PI-BSNet_cp40x40_d5_seed42_ckpt.pth",
+  "optim_file": "Neumann_Parametric_Diffusion_Compare/PI-BSNet_cp40x40_d5_seed42_optim.pth",
+  "bspline": {
+    "n_cp_x": 40,
+    "n_cp_t": 40,
+    "degree": 5
+  }
+}

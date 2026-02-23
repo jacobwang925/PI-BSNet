@@ -1,0 +1,918 @@
+from neuralop.models.fno import TFNO2d   # pip install neuraloperator
+from scipy.integrate import quad
+from torch._C._nn import gelu
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import time
+import torch
+import torch.autograd as autograd
+import torch.nn as nn
+import torch.optim as optim
+
+
+save_dir = 'Baseline_Ablation_Trained_Models'
+os.makedirs(save_dir, exist_ok=True)
+
+generate_data = True
+
+num_samples = 100# data generation
+
+n_samples = 40 # data loading
+
+PDE_WEIGHT  = 1.0
+DATA_WEIGHT = 3.0
+ICBC_WEIGHT = 1.0
+
+epochs = 5000
+
+
+NUM_RUNS = 10
+results_path = os.path.join(save_dir, 'results.npy')
+
+results = {}
+
+
+# ----------------------------
+# Testing configuration
+# ----------------------------
+n_test = 1  # default: exactly your current single test case
+lam_test_default, a_test_default = 1.5, 2.0
+test_seed = 0  # reproducibility for random test pairs when n_test > 1
+
+
+
+# -*- coding: utf-8 -*-
+
+
+
+# -----------------------------------------------------------------------------
+# 0) B‐spline utils & ground truth
+# -----------------------------------------------------------------------------
+def BsFun(i, d, t, Ln):
+    if d == 0:
+        return 1.0 if Ln[i-1] <= t < Ln[i] else 0.0
+    a = 0 if (Ln[d+i-1]-Ln[i-1])==0 else (t-Ln[i-1])/(Ln[d+i-1]-Ln[i-1])
+    b = 0 if (Ln[d+i]  -Ln[i])  ==0 else (Ln[d+i]-t)/(Ln[d+i]-Ln[i])
+    return a*BsFun(i,   d-1, t, Ln) + b*BsFun(i+1, d-1, t, Ln)
+
+def BsFun_derivative(i, d, t, Ln):
+    if d == 0: return 0.0
+    a = 0 if (Ln[d+i-1]-Ln[i-1])==0 else d/(Ln[d+i-1]-Ln[i-1])
+    b = 0 if (Ln[d+i]  -Ln[i])  ==0 else d/(Ln[d+i]  -Ln[i])
+    return a*BsFun(i,   d-1, t, Ln) - b*BsFun(i+1, d-1, t, Ln)
+
+def BsFun_second_derivative(i, d, t, Ln):
+    if d < 2: return 0.0
+    a = 0 if (Ln[d+i-2]-Ln[i-2])==0 else d*(d-1)/((Ln[d+i-2]-Ln[i-2])**2)
+    b = 0 if (Ln[d+i-1]-Ln[i-1])==0 else 2*d*(d-1)/((Ln[d+i-1]-Ln[i-1])**2)
+    c = 0 if (Ln[d+i]  -Ln[i])  ==0 else d*(d-1)/((Ln[d+i]  -Ln[i])  **2)
+    return a*BsFun(i,   d-2, t, Ln) - b*BsFun(i+1, d-2, t, Ln) + c*BsFun(i+2, d-2, t, Ln)
+
+def BsKnots(n_cp, d, Ns):
+    n_knots = n_cp + d + 1
+    Ln = np.zeros(n_knots)
+    for i in range(d+1, n_knots-d-1):
+        Ln[i] = i - d
+    Ln[n_knots-d-1:] = n_cp - d
+    tk = np.linspace(0, Ln[-1], Ns)
+    Bit = np.zeros((Ns, n_cp))
+    for j in range(n_cp):
+        for i in range(Ns):
+            Bit[i,j] = BsFun(j+1, d, tk[i], Ln)
+    Bit[-1,-1] = 1.0
+    return tk, Ln, Bit
+
+def BsKnots_derivatives(n_cp, d, Ns, Ln, tk):
+    Bit_d1 = np.zeros((Ns, n_cp))
+    Bit_d2 = np.zeros((Ns, n_cp))
+    for j in range(n_cp):
+        for i in range(Ns):
+            Bit_d1[i,j] = BsFun_derivative(j+1, d, tk[i], Ln)
+            Bit_d2[i,j] = BsFun_second_derivative(j+1, d, tk[i], Ln)
+    return Bit_d1, Bit_d2
+
+def compute_bspline_derivatives(U, Bt, Bx, Bt_d1, Bx_d1, Bt_d2, Bx_d2):
+    B_t  = Bt_d1 @ U @ Bx.T
+    B_x  = Bt    @ U @ Bx_d1.T
+    B_xx = Bt    @ U @ Bx_d2.T
+    return B_t, B_x, B_xx
+
+def ground_truth(x_vals, T_vals, a, lam):
+    def f(x,t):
+        if t==0: return 0.0
+        return (a-x)/np.sqrt(2*np.pi*t**3)*np.exp(-((a-x)-lam*t)**2/(2*t))
+    def F2(x,T):
+        return 1.0 if x>=a else quad(lambda tt: f(x,tt), 0, T)[0]
+    F = np.zeros((len(T_vals), len(x_vals)))
+    for i,x in enumerate(x_vals):
+        for j,Tj in enumerate(T_vals):
+            F[j,i] = F2(x,Tj)
+    return F
+
+# -----------------------------------------------------------------------------
+# 1) Build data for PINNs/DeepONet/FNO (pinn_data), PI-DBSN (dbsn_data),
+#    full-grid FNO (fno_data), AND IC/BC for each (λ,a)
+# -----------------------------------------------------------------------------
+x_min, T_max = -10.0, 10.0
+n_cp_x, n_cp_t, d = 25, 25, 3
+hidden_dim = 64
+
+
+# precompute time‐spline for PI-DBSN / PINN
+t_np = np.linspace(0, T_max, 101)
+tk_t, Ln_t, Bit_t_np = BsKnots(n_cp_t, d, len(t_np))
+Bt      = torch.tensor(Bit_t_np, dtype=torch.float32)
+Bd1_np, Bd2_np = BsKnots_derivatives(n_cp_t, d, len(t_np), Ln_t, tk_t)
+Bt_d1, Bt_d2  = torch.tensor(Bd1_np, dtype=torch.float32), torch.tensor(Bd2_np, dtype=torch.float32)
+
+# prepare full‐grid for Physics‐informed FNO
+x_grid = np.linspace(x_min, 4.0, 101, dtype=np.float32)
+t_grid = np.linspace(0.0, T_max, 101, dtype=np.float32)
+
+"""Data generation"""
+
+if generate_data:
+    
+# -----------------------------------------------------------------------------
+# Generate & save data once (100 samples)
+# -----------------------------------------------------------------------------
+
+
+    pinn_data, dbsn_data, fno_data, ic_data, bc_data = [], [], [], [], []
+
+    for _ in range(num_samples):
+        a   = np.random.uniform(0,4)
+        lam = np.random.uniform(0,2)
+    
+        # PINN / DeepONet data
+        x_np = np.linspace(x_min, a, 101)
+        F_np = ground_truth(x_np, t_np, a, lam)
+        X, Tm = np.meshgrid(x_np, t_np, indexing='xy')
+        pinn_data.append({
+            'lam': torch.full((len(X.flatten()),1), lam),
+            'a':   torch.full((len(X.flatten()),1), a),
+            'x':   torch.tensor(X.flatten()[:,None], dtype=torch.float32),
+            't':   torch.tensor(Tm.flatten()[:,None], dtype=torch.float32),
+            'F':   torch.tensor(F_np.T.flatten()[:,None], dtype=torch.float32)
+        })
+    
+        # PI-DBSN data
+        tk_x, Ln_x, Bit_x_np = BsKnots(n_cp_x, d, len(x_np))
+        Bx      = torch.tensor(Bit_x_np, dtype=torch.float32)
+        Bx_d1, Bx_d2 = BsKnots_derivatives(n_cp_x, d, len(x_np), Ln_x, tk_x)
+        dbsn_data.append({
+            'lam':   torch.tensor([[lam]]),
+            'a':     torch.tensor([[a]]),
+            'Bx':    Bx,
+            'Bx_d1': torch.tensor(Bx_d1, dtype=torch.float32),
+            'Bx_d2': torch.tensor(Bx_d2, dtype=torch.float32),
+            'F_mat': torch.tensor(F_np, dtype=torch.float32)
+        })
+    
+        # FNO data
+        Ftrue = ground_truth(x_grid, t_grid, a, lam)
+        lam_fld = np.full((len(t_grid),len(x_grid)), lam, dtype=np.float32)
+        a_fld   = np.full_like(lam_fld, a)
+        x_fld   = np.tile(x_grid[None,:], (len(t_grid),1))
+        t_fld   = np.tile(t_grid[:,None], (1,len(x_grid)))
+        P = np.stack([lam_fld, a_fld, x_fld, t_fld], axis=0)
+        fno_data.append({
+            'P': torch.tensor(P, dtype=torch.float32),
+            'Y': torch.tensor(Ftrue[None,:,:], dtype=torch.float32)
+        })
+    
+        # IC data
+        x_ic = torch.linspace(x_min, a, 100)[:,None]
+        ic_data.append({
+            'x':  x_ic,
+            't':  torch.zeros_like(x_ic),
+            'lam':torch.full_like(x_ic, lam),
+            'a':  torch.full_like(x_ic, a),
+            'u0': torch.zeros_like(x_ic)
+        })
+    
+        # BC data
+        t_bc = torch.linspace(0, T_max, 100)[:,None]
+        bc_data.append({
+            'x':  torch.full_like(t_bc, a),
+            't':  t_bc,
+            'lam':torch.full_like(t_bc, lam),
+            'a':  torch.full_like(t_bc, a),
+            'g':  torch.ones_like(t_bc)
+        })
+    
+    # Save to disk
+    torch.save(pinn_data, os.path.join(save_dir, 'pinn_data.pt'))
+    torch.save(dbsn_data, os.path.join(save_dir, 'dbsn_data.pt'))
+    torch.save(fno_data,  os.path.join(save_dir, 'fno_data.pt'))
+    torch.save(ic_data,   os.path.join(save_dir, 'ic_data.pt'))
+    torch.save(bc_data,   os.path.join(save_dir, 'bc_data.pt'))
+    print("Saved all data lists under", save_dir)
+    
+    
+    
+"""Loading Data"""
+
+
+# -----------------------------------------------------------------------------
+# 2) Paths to your saved full‐dataset files
+# -----------------------------------------------------------------------------
+pinn_path = os.path.join(save_dir, 'pinn_data.pt')
+dbsn_path = os.path.join(save_dir, 'dbsn_data.pt')
+fno_path  = os.path.join(save_dir, 'fno_data.pt')
+ic_path   = os.path.join(save_dir, 'ic_data.pt')
+bc_path   = os.path.join(save_dir, 'bc_data.pt')
+
+# -----------------------------------------------------------------------------
+# 3) Load the full datasets
+# -----------------------------------------------------------------------------
+_full_pinn_data = torch.load(pinn_path)
+_full_dbsn_data = torch.load(dbsn_path)
+_full_fno_data  = torch.load(fno_path)
+_full_ic_data   = torch.load(ic_path)
+_full_bc_data   = torch.load(bc_path)
+
+# -----------------------------------------------------------------------------
+# 4) Slice to the first `n_samples` entries and assign back to original names
+# -----------------------------------------------------------------------------
+pinn_data = _full_pinn_data[:n_samples]
+dbsn_data = _full_dbsn_data[:n_samples]
+fno_data  = _full_fno_data[:n_samples]
+ic_data   = _full_ic_data[:n_samples]
+bc_data   = _full_bc_data[:n_samples]
+
+print(f"Loaded {len(pinn_data)} PINN samples, "
+      f"{len(dbsn_data)} PI‐DBSN samples, "
+      f"{len(fno_data)} FNO samples, "
+      f"{len(ic_data)} IC samples, "
+      f"{len(bc_data)} BC samples.")
+
+
+# -----------------------------------------------------------------------------
+# 2) Model definitions
+# -----------------------------------------------------------------------------
+class EPINN(nn.Module):
+    def __init__(self, x_min, T, hidden=64):
+        super().__init__()
+        self.x_min, self.T = x_min, T
+        self.net = nn.Sequential(
+            nn.Linear(4, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, 1)
+        )
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x, t, lam, a):
+        phi_x = (a - x) / (a - self.x_min)
+        phi_t = t / self.T
+        denom = (phi_t + phi_x - phi_t * phi_x).clamp(min=1e-6)
+        g = phi_t / denom
+        inp = torch.cat([x, t, lam.expand_as(x), a.expand_as(x)], dim=1)
+        return g + phi_x * phi_t * self.net(inp)
+
+class SFHCPINN(nn.Module):  # Updated name
+    def __init__(self, x_min, T, hidden=64, nf=20):
+        super().__init__()
+        self.x_min, self.T = x_min, T
+        self.ff = nn.Linear(2, nf, bias=False)
+        nn.init.xavier_normal_(self.ff.weight)
+        self.corr = nn.Sequential(
+            nn.Linear(2 * nf + 2, hidden), nn.ReLU(),
+            nn.Linear(hidden, 1)
+        )
+
+    def forward(self, x, t, lam, a):
+        phi_x = (a - x) / (a - self.x_min)
+        phi_t = t / self.T
+        denom = (phi_t + phi_x - phi_t * phi_x).clamp(min=1e-6)
+        g = phi_t / denom
+        Ff0 = self.ff(torch.cat([x, t], dim=1))
+        Ff = torch.cat([Ff0.sin(), Ff0.cos()], dim=1)
+        inp = torch.cat([Ff, lam.expand_as(x), a.expand_as(x)], dim=1)
+        return g + phi_x * phi_t * self.corr(inp)
+
+class WideBodyPINN(nn.Module):
+    def __init__(self, x_min, T, hidden=64):
+        super().__init__()
+        self.x_min, self.T = x_min, T
+        self.net = nn.Sequential(
+            nn.Linear(4, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, 1)
+        )
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.zeros_(m.bias)
+    def forward(self, x, t, lam, a):
+        phi_x = (a - x) / (a - self.x_min)
+        phi_t = t / self.T
+        denom = (phi_t + phi_x - phi_t*phi_x).clamp(min=1e-6)
+        g = phi_t / denom
+        inp = torch.cat([x, t, lam.expand_as(x), a.expand_as(x)], dim=1)
+        return g + phi_x*phi_t * self.net(inp)
+
+class VSPINN(nn.Module):
+    def __init__(self, x_min, T, hidden=64):
+        super().__init__()
+        self.x_min, self.T = x_min, T
+        self.sx = nn.Parameter(torch.tensor(1.0))
+        self.st = nn.Parameter(torch.tensor(1.0))
+        self.net = nn.Sequential(
+            nn.Linear(4, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, 1)
+        )
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.zeros_(m.bias)
+    def forward(self, x, t, lam, a):
+        xs = (x - self.x_min) * self.sx + self.x_min
+        ts = t * self.st
+        phi_x = (a - xs) / (a - self.x_min)
+        phi_t = ts / self.T
+        denom = (phi_t + phi_x - phi_t*phi_x).clamp(min=1e-6)
+        g = phi_t / denom
+        inp = torch.cat([xs, ts, lam.expand_as(xs), a.expand_as(xs)], dim=1)
+        return g + phi_x*phi_t * self.net(inp)
+
+class CANPINN(nn.Module):
+    def __init__(self, x_min, T, hidden=64, eps=1e-3):
+        super().__init__()
+        self.x_min, self.T, self.eps = x_min, T, eps
+        self.net = nn.Sequential(
+            nn.Linear(4, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, 1)
+        )
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.zeros_(m.bias)
+    def forward(self, x, t, lam, a):
+        phi_x = (a - x) / (a - self.x_min)
+        phi_t = t / self.T
+        denom = (phi_t + phi_x - phi_t*phi_x).clamp(min=1e-6)
+        g = phi_t / denom
+        inp = torch.cat([x, t, lam.expand_as(x), a.expand_as(x)], dim=1)
+        return g + phi_x*phi_t * self.net(inp)
+    def pde_residual(self, u, x, t, lam, a):
+        u_t = autograd.grad(u, t,     grad_outputs=torch.ones_like(u), create_graph=True)[0]
+        u_x = autograd.grad(u, x,     grad_outputs=torch.ones_like(u), create_graph=True)[0]
+        up  = self.forward(x+self.eps, t, lam, a)
+        um  = self.forward(x-self.eps, t, lam, a)
+        u_xx = (up - 2*u + um) / (self.eps**2)
+        return u_t - lam*u_x - 0.5*u_xx
+
+class VanillaPINN(nn.Module):
+    def __init__(self, hidden=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(4, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, 1)
+        )
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.zeros_(m.bias)
+    def forward(self, x, t, lam, a):
+        inp = torch.cat([x, t, lam.expand_as(x), a.expand_as(x)], dim=1)
+        return self.net(inp)
+
+class PIDeepONet(nn.Module):
+    def __init__(self, branch_hidden=64, trunk_hidden=64):
+        super().__init__()
+        self.branch_net = nn.Sequential(
+            nn.Linear(2, branch_hidden), nn.Tanh(),
+            nn.Linear(branch_hidden, branch_hidden), nn.Tanh()
+        )
+        self.trunk_net  = nn.Sequential(
+            nn.Linear(2, trunk_hidden),  nn.Tanh(),
+            nn.Linear(trunk_hidden, trunk_hidden),  nn.Tanh()
+        )
+        self.fc = nn.Linear(branch_hidden, trunk_hidden, bias=False)
+        nn.init.xavier_normal_(self.fc.weight)
+    def forward(self, x, t, lam, a):
+        b  = self.branch_net(torch.cat([lam, a], dim=1))
+        tr = self.trunk_net(torch.cat([x, t],   dim=1))
+        return torch.sum(self.fc(b) * tr, dim=1, keepdim=True)
+
+
+
+class PIFNO(nn.Module):
+    """
+    Physics-Informed FNO: applies TFNO2d on the full 4-channel (λ,a,x,t) grid.
+    """
+    def __init__(self, modes_x=16, modes_t=16, width=64):
+        super().__init__()
+        # TFNO2d(n_modes_x, n_modes_t, hidden_channels,
+        #        in_channels, out_channels, n_layers)
+        self.fno = TFNO2d(
+            modes_x, modes_t, width,
+            in_channels=4, out_channels=1,
+            n_layers=4
+        )
+
+    def forward(self, P):
+        # P: [batch, 4, Nx, Nt]
+        # returns [batch, 1, Nx, Nt]
+        return self.fno(P)
+
+
+class ControlPointNet(nn.Module):
+    def __init__(self, n_cp_x, n_cp_t, hidden_dim=64):
+        super().__init__()
+        self.fc1 = nn.Linear(2, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        # fc3 now outputs exactly (n_cp_t-1)*(n_cp_x-1)
+        self.fc3 = nn.Linear(hidden_dim, (n_cp_t-1)*(n_cp_x-1))
+    def forward(self, lam, a):
+        x = torch.cat([lam,a],dim=1)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)      # <— apply fc3 here
+        return x             # shape [1, (n_cp_t-1)*(n_cp_x-1)]
+
+class PIDBSN(nn.Module):
+    """PI-DBSN: predict U_pred, then assemble & evaluate in training loop"""
+    def __init__(self, n_cp_x, n_cp_t, d, hidden_dim=64):
+        super().__init__()
+        self.n_cp_x, self.n_cp_t = n_cp_x, n_cp_t
+        self.ctrl = ControlPointNet(n_cp_x, n_cp_t, hidden_dim)
+    def forward(self, lam, a):
+        u = self.ctrl(lam, a)                 # [1, (n_cp_t-1)*(n_cp_x-1)]
+        U_pred = u.view(1, self.n_cp_t-1, self.n_cp_x-1)
+        return U_pred                         # shape [1, n_cp_t-1, n_cp_x-1]
+
+
+# PDE residual helper
+def pde_res(u, x, t, lam, a):
+    u_t  = torch.autograd.grad(u, t, grad_outputs=torch.ones_like(u), create_graph=True)[0]
+    u_x  = torch.autograd.grad(u, x, grad_outputs=torch.ones_like(u), create_graph=True)[0]
+    u_xx = torch.autograd.grad(u_x, x, grad_outputs=torch.ones_like(u_x), create_graph=True)[0]
+    return u_t - lam*u_x - 0.5*u_xx
+
+
+
+
+"""Save trained models, losses, and training time"""
+
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+model_constructors = {
+    'EPINN':         lambda: EPINN(x_min, T_max, hidden_dim).to(device),
+    'SFHCPINN':      lambda: SFHCPINN(x_min, T_max, hidden_dim).to(device),
+    'HWPINN':  lambda: WideBodyPINN(x_min, T_max, hidden_dim).to(device),
+    'VS-PINN':        lambda: VSPINN(x_min, T_max, hidden_dim).to(device),
+    'CAN-PINN':       lambda: CANPINN(x_min, T_max, hidden_dim).to(device),
+    'VanillaPINN':   lambda: VanillaPINN(hidden_dim).to(device),
+    'PIDeepONet':    lambda: PIDeepONet(64, 64).to(device),
+    'PIFNO':         lambda: PIFNO(12, 12, 32).to(device),
+    'PIDBSN_FD':     lambda: PIDBSN(n_cp_x, n_cp_t, d, hidden_dim).to(device),
+    'PIDBSN':        lambda: PIDBSN(n_cp_x, n_cp_t, d, hidden_dim).to(device),
+}
+
+summary = {}
+trained_models = {}
+
+for name, ctor in model_constructors.items():
+    print(f"\n=== Training {name} ===")
+
+    times  = []
+    L2_errors = []
+    relL2_errors = []
+    max_errors = []
+
+
+    total_hists = []
+    pde_hists   = []
+    data_hists  = []
+    icbc_hists  = []
+
+
+    for run in range(NUM_RUNS):
+        model     = ctor()
+        optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+        # per‐epoch histories
+        total_hist = []
+        pde_hist   = []
+        data_hist  = []
+        icbc_hist  = []
+
+        start_time = time.time()
+        for epoch in tqdm(range(1, epochs+1), desc=name):
+            optimizer.zero_grad()
+
+            total_loss = 0.0
+            pde_loss   = 0.0
+            data_loss  = 0.0
+            icbc_loss  = 0.0
+
+            if name == 'PIDBSN':
+                for data in dbsn_data:
+                    lam = data['lam'].to(device); a = data['a'].to(device)
+                    Bx  = data['Bx'].to(device)
+
+                    # assemble U_full
+                    U_pred = model(lam, a)[0]
+                    U_full = torch.ones(n_cp_t, n_cp_x, device=device)
+                    U_full[0,:]   = 0.0
+                    U_full[:,-1]  = 1.0
+                    U_full[1:,:-1]= U_pred
+
+                    # evaluate B-spline + derivatives
+                    B    = Bt.to(device) @ U_full @ Bx.T
+                    B_t, B_x, B_xx = compute_bspline_derivatives(
+                        U_full,
+                        Bt.to(device), Bx,
+                        Bt_d1.to(device), data['Bx_d1'].to(device),
+                        Bt_d2.to(device), data['Bx_d2'].to(device)
+                    )
+
+                    # compute losses
+                    Lpde  = torch.mean((B_t - lam*B_x - 0.5*B_xx)**2)
+                    Ldata = torch.mean((B    - data['F_mat'].to(device))**2)
+
+                    total_loss += PDE_WEIGHT*Lpde + DATA_WEIGHT*Ldata
+                    pde_loss   += PDE_WEIGHT*Lpde.item()
+                    data_loss  += DATA_WEIGHT*Ldata.item()
+
+            elif name == 'PIDBSN_FD':
+                for data in dbsn_data:
+                    lam = data['lam'].to(device); a = data['a'].to(device)
+                    Bx  = data['Bx'].to(device)
+
+                    U_pred = model(lam, a)[0]
+                    U_full = torch.ones(n_cp_t, n_cp_x, device=device)
+                    U_full[0,:]   = 0.0
+                    U_full[:,-1]  = 1.0
+                    U_full[1:,:-1]= U_pred
+
+                    B = Bt.to(device) @ U_full @ Bx.T
+                    Nt, Nx = B.shape
+                    dt = T_max/(Nt-1)
+                    dx = (a.item()-x_min)/(Nx-1)
+
+                    # finite differences
+                    B_t_fd  = torch.zeros_like(B)
+                    B_t_fd[1:-1] = (B[2:]   - B[:-2])   /(2*dt)
+                    B_t_fd[0]    = (B[1]    - B[0])      / dt
+                    B_t_fd[-1]   = (B[-1]   - B[-2])     / dt
+
+                    B_x_fd  = torch.zeros_like(B)
+                    B_x_fd[:,1:-1] = (B[:,2:] - B[:,:-2])/(2*dx)
+                    B_x_fd[:,0]    = (B[:,1] - B[:,0])    / dx
+                    B_x_fd[:,-1]   = (B[:,-1] - B[:,-2])  / dx
+
+                    B_xx_fd = torch.zeros_like(B)
+                    B_xx_fd[:,1:-1] = (B[:,2:] - 2*B[:,1:-1] + B[:,:-2])/(dx**2)
+                    B_xx_fd[:,0]    = (B[:,2]  - 2*B[:,1]    + B[:,0])   /(dx**2)
+                    B_xx_fd[:,-1]   = (B[:,-1] - 2*B[:,-2]  + B[:,-3])   /(dx**2)
+
+                    Lpde_fd = torch.mean((B_t_fd - lam*B_x_fd - 0.5*B_xx_fd)**2)
+                    Ldata   = torch.mean((B      - data['F_mat'].to(device))**2)
+
+                    total_loss += PDE_WEIGHT*Lpde_fd + DATA_WEIGHT*Ldata
+                    pde_loss   += PDE_WEIGHT*Lpde_fd.item()
+                    data_loss  += DATA_WEIGHT*Ldata.item()
+
+            elif name == 'PIFNO':
+
+                for data in fno_data:
+                    # —————————————————————
+                    # 1) Forward pass (field)
+                    # —————————————————————
+                    P      = data['P'].to(device)            # [4, Nt, Nx]
+                    P      = P.unsqueeze(0).permute(0,1,3,2)  # [1,4,Nx,Nt]
+                    P.requires_grad_(True)
+
+                    u_pred = model(P).squeeze(1)              # [1, Nx, Nt]
+                    Y_true = data['Y'][0].T.to(device).unsqueeze(0)
+
+                    # —————————————————————
+                    # 2) Data + IC + BC losses
+                    # —————————————————————
+                    Ldata = torch.mean((u_pred - Y_true)**2)
+
+                    # initial condition (t=0 slice)
+                    u_ic = u_pred[0, :, 0]
+                    y_ic = Y_true[0, :, 0]
+                    Lic  = torch.mean((u_ic - y_ic)**2)
+
+                    # boundary condition (x=a slice)
+                    a_val = data['P'][1,0,0].item()
+                    idx   = int((np.abs(x_grid - a_val)).argmin())
+                    u_bc  = u_pred[0, idx, :]
+                    y_bc  = Y_true[0, idx, :]
+                    Lic  += torch.mean((u_bc - y_bc)**2)
+
+                    # —————————————————————
+                    # 3) PDE residual via autograd on P
+                    # —————————————————————
+                    # grad_P: d u_pred / d P, shape [1,4,Nx,Nt]
+                    grad_P = torch.autograd.grad(
+                        u_pred,
+                        P,
+                        grad_outputs=torch.ones_like(u_pred),
+                        create_graph=True
+                    )[0]
+
+                    # ∂u/∂t  is channel 3, ∂u/∂x is channel 2
+                    u_t = grad_P[:, 3, :, :]      # [1, Nx, Nt]
+                    u_x = grad_P[:, 2, :, :]
+
+                    # second derivative ∂²u/∂x²
+                    grad2 = torch.autograd.grad(
+                        u_x,
+                        P,
+                        grad_outputs=torch.ones_like(u_x),
+                        create_graph=True
+                    )[0]
+                    u_xx = grad2[:, 2, :, :]
+
+                    lam_val = data['P'][0,0,0]     # scalar
+                    res     = u_t - lam_val*u_x - 0.5*u_xx
+                    Lpde    = torch.mean(res**2)
+
+                    # —————————————————————
+                    # 4) Accumulate total loss & histories
+                    # —————————————————————
+                    total_loss += PDE_WEIGHT*Lpde + DATA_WEIGHT*Ldata + ICBC_WEIGHT*Lic
+                    pde_loss   += PDE_WEIGHT*Lpde.item()
+                    data_loss  += DATA_WEIGHT*Ldata.item()
+                    icbc_loss  += ICBC_WEIGHT*Lic.item()
+
+            else:
+                # PINNs & DeepONet
+                for data in pinn_data:
+                    lam = data['lam'].to(device); a = data['a'].to(device)
+                    x   = data['x'].to(device).requires_grad_(True)
+                    t   = data['t'].to(device).requires_grad_(True)
+
+                    u_pred = model(x, t, lam, a)
+                    res    = (model.pde_residual(u_pred, x, t, lam, a)
+                            if hasattr(model,'pde_residual')
+                            else pde_res(u_pred, x, t, lam, a))
+                    Lpde = torch.mean(res**2)
+                    Ldata= torch.mean((u_pred - data['F'].to(device))**2)
+
+                    total_loss += PDE_WEIGHT*Lpde + DATA_WEIGHT*Ldata
+                    pde_loss   += PDE_WEIGHT*Lpde.item()
+                    data_loss  += DATA_WEIGHT*Ldata.item()
+
+                # IC/BC for VanillaPINN & PIDeepONet
+                if name in ['VanillaPINN','PIDeepONet']:
+                    Lic_ic = 0.0
+                    for data in ic_data:
+                        term = torch.mean((model(
+                            data['x'].to(device),
+                            data['t'].to(device),
+                            data['lam'].to(device),
+                            data['a'].to(device)
+                        ) - data['u0'].to(device))**2)
+                        Lic_ic += term
+                    for data in bc_data:
+                        term = torch.mean((model(
+                            data['x'].to(device),
+                            data['t'].to(device),
+                            data['lam'].to(device),
+                            data['a'].to(device)
+                        ) - data['g'].to(device))**2)
+                        Lic_ic += term
+
+                    total_loss += ICBC_WEIGHT*Lic_ic
+                    icbc_loss  += ICBC_WEIGHT*Lic_ic.item()
+
+            # step
+            total_loss.backward()
+            optimizer.step()
+
+            # record
+            total_hist.append(total_loss.item())
+            pde_hist.append(pde_loss)
+            data_hist.append(data_loss)
+            icbc_hist.append(icbc_loss)
+
+        train_time = time.time() - start_time
+
+        total_hists.append(total_hist)
+        pde_hists.append(pde_hist)
+        data_hists.append(data_hist)
+        icbc_hists.append(icbc_hist)
+        
+
+
+        # -----------------------------------
+        # 2) Test (n_test pairs) and average metrics per run
+        # -----------------------------------
+        t_test = np.linspace(0, T_max, 101)
+
+        if n_test == 1:
+            test_pairs = [(lam_test_default, a_test_default)]
+        else:
+            rng = np.random.default_rng(seed=test_seed + run)  # vary by run, reproducible
+            test_pairs = [(float(rng.uniform(0, 2)), float(rng.uniform(0, 4))) for _ in range(n_test)]
+
+        model.eval()
+
+        L2_list, relL2_list, max_list = [], [], []
+
+        with torch.no_grad():
+            for (lam_test, a_test) in test_pairs:
+                x_test = np.linspace(x_min, a_test, 101)
+                Xg, Tg = np.meshgrid(x_test, t_test, indexing='xy')
+                F_true = ground_truth(x_test, t_test, a_test, lam_test)
+
+                # ---------- Predict ----------
+                if name in ['PIDBSN', 'PIDBSN_FD']:
+                    tk_x, Ln_x, Bit_x_np = BsKnots(n_cp_x, d, len(x_test))
+                    Bx_test = torch.tensor(Bit_x_np, dtype=torch.float32).to(device)
+
+                    lam_t = torch.tensor([[lam_test]], dtype=torch.float32).to(device)
+                    a_t   = torch.tensor([[a_test]],   dtype=torch.float32).to(device)
+
+                    U_pred = model(lam_t, a_t)[0]
+                    U_full = torch.ones(n_cp_t, n_cp_x, device=device)
+                    U_full[0, :]    = 0.0
+                    U_full[:, -1]   = 1.0
+                    U_full[1:, :-1] = U_pred
+
+                    B_pred = (Bt.to(device) @ U_full @ Bx_test.T).cpu().numpy()  # (Nt, Nx)
+
+                elif name == 'PIFNO':
+                    lam_fld = np.full((len(t_test), len(x_test)), lam_test, dtype=np.float32)
+                    a_fld   = np.full_like(lam_fld, a_test)
+                    x_fld   = np.tile(x_test[None, :], (len(t_test), 1))
+                    t_fld   = np.tile(t_test[:, None], (1, len(x_test)))
+                    Ptest   = np.stack([lam_fld, a_fld, x_fld, t_fld], axis=0)  # [4, Nt, Nx]
+
+                    Pbatch = torch.tensor(Ptest, dtype=torch.float32).to(device)
+                    Pbatch = Pbatch.unsqueeze(0).permute(0, 1, 3, 2)            # [1,4,Nx,Nt]
+
+                    Uout  = model(Pbatch).cpu().numpy()[0, 0]                  # [Nx, Nt]
+                    B_pred = Uout.T                                            # (Nt, Nx)
+
+                else:
+                    xf = torch.tensor(Xg.flatten()[:, None], dtype=torch.float32).to(device)
+                    tf = torch.tensor(Tg.flatten()[:, None], dtype=torch.float32).to(device)
+                    lam_f = torch.full_like(xf, lam_test).to(device)
+                    a_f   = torch.full_like(xf, a_test).to(device)
+
+                    U_flat = model(xf, tf, lam_f, a_f).cpu().numpy()
+                    B_pred = U_flat.reshape(Xg.shape)                          # (Nt, Nx)
+
+                # ---------- Metrics ----------
+                err = np.abs(B_pred - F_true)
+
+                L2 = np.linalg.norm(err.ravel(), 2)
+                rel_L2 = L2 / (np.linalg.norm(F_true.ravel(), 2) + 1e-12)
+                mx = float(err.max())
+
+                L2_list.append(float(L2))
+                relL2_list.append(float(rel_L2))
+                max_list.append(mx)
+
+        # average over test pairs for THIS run
+        L2_run = float(np.mean(L2_list))
+        relL2_run = float(np.mean(relL2_list))
+        max_run = float(np.mean(max_list))
+
+        times.append(train_time)
+        L2_errors.append(L2_run)
+        max_errors.append(max_run)
+        relL2_errors.append(relL2_run)
+
+    
+    results[name] = {
+        'times':       np.array(times,       dtype=np.float32),
+        'L2_errors':   np.array(L2_errors,   dtype=np.float32),
+        'relL2_errors':np.array(relL2_errors,dtype=np.float32),
+        'max_errors':  np.array(max_errors,  dtype=np.float32),
+        'total_hists': np.array(total_hists, dtype=np.float32),
+        'pde_hists':   np.array(pde_hists,   dtype=np.float32),
+        'data_hists':  np.array(data_hists,  dtype=np.float32),
+        'icbc_hists':  np.array(icbc_hists,  dtype=np.float32),
+    }
+
+    # save after each model so you never lose data
+    np.save(results_path, results)
+
+
+# trade off plots
+
+
+# 1) Set your results directory
+save_dir = 'Baseline_Ablation_Trained_Models'
+
+# 2) Load the saved results dict
+results_path = os.path.join(save_dir, 'results.npy')
+results = np.load(results_path, allow_pickle=True).item()
+
+# 3) Compute average metrics per model
+avg_times  = {m: results[m]['times'].mean()        for m in results}
+avg_l2     = {m: results[m]['L2_errors'].mean()    for m in results}
+avg_rel_l2 = {m: results[m]['relL2_errors'].mean() for m in results}
+avg_max    = {m: results[m]['max_errors'].mean()   for m in results}
+
+
+# 4) Plot Avg Training Time vs Avg L2 Error
+plt.figure(figsize=(6,6))
+for m in results:
+    plt.scatter(avg_times[m], avg_rel_l2[m], s=50)
+    plt.text(avg_times[m], avg_rel_l2[m], m, fontsize=9, va='bottom', ha='right')
+plt.xlabel('Avg. Training Time (s)')
+plt.ylabel('Avg. Relative L2 Error')
+plt.title('Time vs Relative L2 Error Tradeoff')
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(os.path.join(save_dir, 'tradeoff_rel_l2.png'), dpi=300)
+plt.close()
+
+
+# 5) Plot Avg Training Time vs Avg Max Error
+plt.figure(figsize=(6,6))
+for m in results:
+    plt.scatter(avg_times[m], avg_max[m], s=50)
+    plt.text(avg_times[m], avg_max[m], m, fontsize=9, va='bottom', ha='right')
+plt.xlabel('Avg. Training Time (s)')
+plt.ylabel('Avg. Max Error')
+plt.title('Time vs Max Error Tradeoff')
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(os.path.join(save_dir, 'tradeoff_max.png'), dpi=300)
+plt.close()
+
+print("Saved: tradeoff_l2.png and tradeoff_max.png in", save_dir)
+        
+
+
+
+# 1) Load the saved results dict
+results = np.load(results_path, allow_pickle=True).item()
+
+# 2) Prepare model names and epoch axis
+names      = list(results.keys())
+epochs_arr = np.arange(1, epochs + 1)
+
+# 3) Create subplots
+fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+
+for name in names:
+    hist      = results[name]
+    pde_runs  = hist['pde_hists']   # shape: (NUM_RUNS, epochs)
+    data_runs = hist['data_hists']
+    icbc_runs = hist['icbc_hists']
+
+    # compute mean & std
+    pde_mean,  pde_std  = pde_runs.mean(axis=0),  pde_runs.std(axis=0)
+    data_mean, data_std = data_runs.mean(axis=0), data_runs.std(axis=0)
+    icbc_mean, icbc_std = icbc_runs.mean(axis=0), icbc_runs.std(axis=0)
+
+    # plot PDE loss
+    axes[0].plot(epochs_arr, pde_mean, label=name)
+    axes[0].fill_between(epochs_arr,
+                         pde_mean - pde_std,
+                         pde_mean + pde_std,
+                         alpha=0.2)
+
+    # plot Data loss
+    axes[1].plot(epochs_arr, data_mean, label=name)
+    axes[1].fill_between(epochs_arr,
+                         data_mean - data_std,
+                         data_mean + data_std,
+                         alpha=0.2)
+
+    # plot IC/BC loss
+    axes[2].plot(epochs_arr, icbc_mean, label=name)
+    axes[2].fill_between(epochs_arr,
+                         icbc_mean - icbc_std,
+                         icbc_mean + icbc_std,
+                         alpha=0.2)
+
+# titles, log‐scale, labels, legends
+axes[0].set_title('PDE Loss vs Epoch (mean ± std)')
+axes[1].set_title('Data Loss vs Epoch (mean ± std)')
+axes[2].set_title('IC/BC Loss vs Epoch (mean ± std)')
+
+for ax in axes:
+    ax.set_yscale('log')
+    ax.set_ylabel('Loss (log scale)')
+    ax.legend(fontsize=8)
+
+axes[2].set_xlabel('Epoch')
+
+plt.tight_layout()
+plt.savefig(os.path.join(save_dir, 'loss_curves_mean_std.png'), dpi=300)
+plt.close()
+
+print(f"Saved: loss_curves_mean_std.png in {save_dir}")

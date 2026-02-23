@@ -1,0 +1,16 @@
+{
+  "model_name": "PI-DeepONet",
+  "seed": 42,
+  "trained_this_run": true,
+  "train_time_sec": 1064.4832587242126,
+  "epochs": 5000,
+  "lr": 0.001,
+  "loss_weights": {
+    "PDE": 1.0,
+    "DATA": 5.0,
+    "IC": 2.0,
+    "BC": 2.0
+  },
+  "ckpt_file": "Neumann_Parametric_Diffusion_Compare/PI-DeepONet_seed42_new_ckpt.pth",
+  "optim_file": "Neumann_Parametric_Diffusion_Compare/PI-DeepONet_seed42_new_optim.pth"
+}

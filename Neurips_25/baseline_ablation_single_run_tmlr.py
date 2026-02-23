@@ -18,17 +18,22 @@ os.makedirs(save_dir, exist_ok=True)
 
 generate_data = True
 
-num_samples = 100 # data generation
+# num_samples = 100 # data generation
 
-n_samples = 40 # data loading
+# n_samples = 40 # data loading
+
+num_samples = 5 # data generation
+
+n_samples = 5 # data loading
+
 
 PDE_WEIGHT  = 1.0
 DATA_WEIGHT = 3.0
 ICBC_WEIGHT = 1.0
 
-epochs = 5000
+# epochs = 5000
 
-
+epochs = 1
 
 # -*- coding: utf-8 -*-
 """ICLR25_Baseline_Ablation.ipynb

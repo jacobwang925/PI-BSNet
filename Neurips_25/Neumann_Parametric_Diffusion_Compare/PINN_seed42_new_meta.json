@@ -1,0 +1,16 @@
+{
+  "model_name": "PINN",
+  "seed": 42,
+  "trained_this_run": true,
+  "train_time_sec": 914.4175848960876,
+  "epochs": 5000,
+  "lr": 0.001,
+  "loss_weights": {
+    "PDE": 1.0,
+    "DATA": 5.0,
+    "IC": 2.0,
+    "BC": 2.0
+  },
+  "ckpt_file": "Neumann_Parametric_Diffusion_Compare/PINN_seed42_new_ckpt.pth",
+  "optim_file": "Neumann_Parametric_Diffusion_Compare/PINN_seed42_new_optim.pth"
+}
