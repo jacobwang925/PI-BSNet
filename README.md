@@ -26,8 +26,6 @@ Derivative calculation ablations: `derivatives_ablation.ipynb`
 
 ## Citation
 
-If you find our work helpful, please consider citing our paper.
-
 ```
 @article{wang2025physics,
   title={Physics-Informed Deep B-Spline Networks},
