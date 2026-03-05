@@ -1,5 +1,5 @@
 # PI-BSNet
-Implementation of paper ["Physics-Informed Deep B-Spline Networks"](https://arxiv.org/abs/2503.16777), in Transactions on Machine Learning Research (TMLR).
+Official implementation of the paper ["Physics-Informed Deep B-Spline Networks"](https://arxiv.org/abs/2503.16777), published in Transactions on Machine Learning Research (TMLR), with presentation at the AI&PDE workshop at ICLR 2026.
 
 ![diagram](plots/diagram.png)
 
